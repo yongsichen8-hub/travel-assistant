@@ -12,11 +12,18 @@ export async function GET(req: Request) {
   const code = url.searchParams.get('code');
   const error = url.searchParams.get('error');
 
+  const basePath = process.env.NEXT_PUBLIC_BASE_PATH || '';
+
+  // 构建前端可访问的 origin（优先从 X-Forwarded 头获取真实外部地址）
+  const proto = req.headers.get('x-forwarded-proto') || 'http';
+  const host = req.headers.get('x-forwarded-host') || req.headers.get('host') || url.host;
+  const externalOrigin = `${proto}://${host}`;
+
   // 飞书授权拒绝或出错
   if (error || !code) {
     const msg = error || '缺少 code 参数';
     console.error('[feishu/callback] 授权失败:', msg);
-    return NextResponse.redirect(new URL(`/?error=${encodeURIComponent(msg)}`, url.origin));
+    return NextResponse.redirect(new URL(`${basePath}/?error=${encodeURIComponent(msg)}`, externalOrigin));
   }
 
   const appId = process.env.FEISHU_APP_ID?.trim();
@@ -25,7 +32,7 @@ export async function GET(req: Request) {
 
   if (!appId || !appSecret) {
     console.error('[feishu/callback] 环境变量缺失');
-    return NextResponse.redirect(new URL('/?error=服务端配置缺失', url.origin));
+    return NextResponse.redirect(new URL(`${basePath}/?error=服务端配置缺失`, externalOrigin));
   }
 
   try {
@@ -48,7 +55,7 @@ export async function GET(req: Request) {
     if (tokenData.code !== 0 || !tokenData.access_token) {
       const msg = tokenData.msg || `token交换失败(code=${tokenData.code})`;
       console.error('[feishu/callback] token 获取失败:', msg);
-      return NextResponse.redirect(new URL(`/?error=${encodeURIComponent(msg)}`, url.origin));
+      return NextResponse.redirect(new URL(`${basePath}/?error=${encodeURIComponent(msg)}`, externalOrigin));
     }
 
     const userAccessToken = tokenData.access_token as string;
@@ -68,7 +75,7 @@ export async function GET(req: Request) {
     if (userInfoData.code !== 0 || !userInfoData.data) {
       const msg = userInfoData.msg || '获取用户信息失败';
       console.error('[feishu/callback] 用户信息获取失败:', msg);
-      return NextResponse.redirect(new URL(`/?error=${encodeURIComponent(msg)}`, url.origin));
+      return NextResponse.redirect(new URL(`${basePath}/?error=${encodeURIComponent(msg)}`, externalOrigin));
     }
 
     const d = userInfoData.data;
@@ -82,7 +89,7 @@ export async function GET(req: Request) {
 
     // 3. 设置 Cookie 并重定向回首页
     const cookieValue = Buffer.from(JSON.stringify(userInfo)).toString('base64');
-    const response = NextResponse.redirect(new URL('/', url.origin));
+    const response = NextResponse.redirect(new URL(`${basePath}/`, externalOrigin));
     response.cookies.set('feishu_user', cookieValue, {
       path: '/',
       maxAge: 7 * 24 * 3600, // 7 天
@@ -105,6 +112,6 @@ export async function GET(req: Request) {
   } catch (err) {
     console.error('[feishu/callback] 异常:', err);
     const msg = err instanceof Error ? err.message : '未知异常';
-    return NextResponse.redirect(new URL(`/?error=${encodeURIComponent(msg)}`, url.origin));
+    return NextResponse.redirect(new URL(`${basePath}/?error=${encodeURIComponent(msg)}`, externalOrigin));
   }
 }
