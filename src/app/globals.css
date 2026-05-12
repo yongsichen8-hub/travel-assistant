@@ -24,3 +24,30 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+.input-base {
+  border-radius: 0.375rem;
+  border: 1px solid #d4d4d8;
+  padding: 0.375rem 0.75rem;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.input-base:focus {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 1px #3b82f6;
+}
+
+@media (prefers-color-scheme: dark) {
+  .input-base {
+    border-color: #52525b;
+    background-color: #27272a;
+    color: #e4e4e7;
+  }
+  .input-base:focus {
+    border-color: #60a5fa;
+    box-shadow: 0 0 0 1px #60a5fa;
+  }
+}
