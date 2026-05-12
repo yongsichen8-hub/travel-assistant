@@ -14,7 +14,7 @@ export function FeishuUserProvider({ initialUser, children }: Props) {
 
   const logout = useCallback(async () => {
     // 调用服务端登出接口，同时清除 httpOnly 的 feishu_tokens cookie
-    await fetch('/api/feishu/logout', { method: 'POST' }).catch(() => {});
+    await fetch(`${process.env.NEXT_PUBLIC_BASE_PATH || ''}/api/feishu/logout`, { method: 'POST' }).catch(() => {});
     setUser(null);
   }, []);
 

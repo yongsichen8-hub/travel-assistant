@@ -22,7 +22,7 @@ export function LoginScreen() {
 
         {/* 登录按钮 */}
         <a
-          href="/api/feishu/auth"
+          href={`${process.env.NEXT_PUBLIC_BASE_PATH || ''}/api/feishu/auth`}
           className="flex w-full items-center justify-center gap-2.5 rounded-lg px-4 py-3 text-sm font-medium text-white transition-colors"
           style={{ backgroundColor: '#3370FF' }}
           onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#2860E0')}

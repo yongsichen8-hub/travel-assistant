@@ -2,6 +2,7 @@
 
 import { useRef, useEffect, useMemo, useCallback } from 'react';
 import { useChat } from '@ai-sdk/react';
+import { DefaultChatTransport } from 'ai';
 import { ChatInput } from './ChatInput';
 import { MessageBubble } from './MessageBubble';
 import { ToolCallIndicator } from './ToolCallIndicator';
@@ -29,6 +30,9 @@ export function ChatContainer({
 
   const { messages, sendMessage, status } = useChat({
     id: sessionId,
+    transport: new DefaultChatTransport({
+      api: `${process.env.NEXT_PUBLIC_BASE_PATH || ''}/api/chat`,
+    }),
     messages: initialMessagesRef.current,
   });
 

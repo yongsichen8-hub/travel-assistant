@@ -2,6 +2,9 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   basePath: '/travel',
+  env: {
+    NEXT_PUBLIC_BASE_PATH: '/travel',
+  },
   images: {
     remotePatterns: [
       {
