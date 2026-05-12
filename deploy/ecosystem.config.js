@@ -3,11 +3,11 @@ module.exports = {
     {
       name: 'travel-assistant',
       script: 'node_modules/.bin/next',
-      args: 'start -p 888',
+      args: 'start -p 8888',
       cwd: '/opt/travel-assistant',
       env: {
         NODE_ENV: 'production',
-        PORT: '888',
+        PORT: '8888',
       },
       instances: 1,
       autorestart: true,
