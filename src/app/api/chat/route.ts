@@ -37,7 +37,7 @@ export async function POST(req: Request) {
       system: getSystemPrompt(travelConfig),
       messages: modelMessages,
       tools,
-      stopWhen: stepCountIs(Number(process.env.MAX_AGENT_ITERATIONS) || 8),
+      stopWhen: stepCountIs(Number(process.env.MAX_AGENT_ITERATIONS) || 12),
       temperature: Number(process.env.LLM_TEMPERATURE) || 0.7,
     });
 
