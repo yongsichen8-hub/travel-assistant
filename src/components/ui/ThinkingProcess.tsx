@@ -1,24 +1,13 @@
 'use client';
 
 import { useState } from 'react';
+import { getToolDescription, STANDARD_PIPELINE } from '@/lib/ui/tool-descriptions';
 
 interface ToolStep {
   toolName: string;
   state: string;
-  startTime?: number;
+  input?: Record<string, unknown>;
 }
-
-const TOOL_LABELS: Record<string, string> = {
-  geocode: '查询位置信息',
-  search_poi: '搜索兴趣点',
-  plan_route: '规划路线',
-  search_flights: '搜索航班',
-  search_nearby_hotels: '搜索酒店',
-  check_schedule: '查询飞书日历',
-  create_calendar_event: '创建日历日程',
-  get_weather: '查询天气',
-  generate_final_itinerary: '生成行程方案',
-};
 
 interface ThinkingProcessProps {
   steps: ToolStep[];
@@ -32,7 +21,6 @@ export function ThinkingProcess({ steps, isStreaming, totalTime }: ThinkingProce
   if (steps.length === 0) return null;
 
   const completedCount = steps.filter(s => s.state === 'output-available').length;
-  const allDone = !isStreaming && completedCount === steps.length;
 
   const title = isStreaming
     ? '深度思考中...'
@@ -45,15 +33,12 @@ export function ThinkingProcess({ steps, isStreaming, totalTime }: ThinkingProce
         onClick={() => setIsOpen(!isOpen)}
         className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors hover:bg-zinc-100/50 dark:hover:bg-zinc-700/30 rounded-lg"
       >
-        {/* 图标 */}
         <span className={`text-sm ${isStreaming ? 'animate-pulse' : ''}`}>
           {isStreaming ? '✨' : '✅'}
         </span>
-        {/* 标题 */}
         <span className="flex-1 font-medium text-zinc-600 dark:text-zinc-300">
           {title}
         </span>
-        {/* 展开/收起箭头 */}
         <svg
           className={`h-3.5 w-3.5 text-zinc-400 transition-transform ${isOpen ? 'rotate-180' : ''}`}
           fill="none"
@@ -65,18 +50,20 @@ export function ThinkingProcess({ steps, isStreaming, totalTime }: ThinkingProce
         </svg>
       </button>
 
+      {/* 流程路径指示器 — 始终可见 */}
+      <FlowPath steps={steps} isStreaming={isStreaming} />
+
       {/* 展开的时间轴内容 */}
       {isOpen && (
         <div className="border-t border-zinc-200/60 px-3 py-2 dark:border-zinc-700/60">
           <div className="space-y-1.5">
             {steps.map((step, i) => {
-              const label = TOOL_LABELS[step.toolName] || step.toolName;
+              const label = getToolDescription(step.toolName, step.input);
               const isDone = step.state === 'output-available';
               const isActive = !isDone && (step.state === 'input-streaming' || step.state === 'input-available');
 
               return (
                 <div key={`${step.toolName}-${i}`} className="flex items-center gap-2">
-                  {/* 状态指示器 */}
                   <div className="flex h-4 w-4 items-center justify-center">
                     {isDone ? (
                       <svg className="h-3.5 w-3.5 text-green-500" fill="currentColor" viewBox="0 0 20 20">
@@ -88,7 +75,6 @@ export function ThinkingProcess({ steps, isStreaming, totalTime }: ThinkingProce
                       <span className="h-2 w-2 rounded-full bg-zinc-300 dark:bg-zinc-600" />
                     )}
                   </div>
-                  {/* 步骤名称 */}
                   <span className={`text-xs ${
                     isDone
                       ? 'text-zinc-500 dark:text-zinc-400'
@@ -104,6 +90,55 @@ export function ThinkingProcess({ steps, isStreaming, totalTime }: ThinkingProce
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/** 流程路径指示器 — 水平面包屑 */
+function FlowPath({ steps, isStreaming }: { steps: ToolStep[]; isStreaming: boolean }) {
+  // 收集当前 step 中出现过的 toolName 及其状态
+  const toolStates = new Map<string, 'completed' | 'active'>();
+  for (const step of steps) {
+    if (step.state === 'output-available') {
+      toolStates.set(step.toolName, 'completed');
+    } else if (step.state === 'input-streaming' || step.state === 'input-available') {
+      if (!toolStates.has(step.toolName) || toolStates.get(step.toolName) !== 'completed') {
+        toolStates.set(step.toolName, 'active');
+      }
+    }
+  }
+
+  // 过滤：只显示已触发的步骤 + streaming 时显示 generate_final_itinerary 作为终点
+  const visiblePipeline = STANDARD_PIPELINE.filter(item => {
+    if (toolStates.has(item.key)) return true;
+    // streaming 时，始终显示 generate_final_itinerary 作为终点目标
+    if (isStreaming && item.key === 'generate_final_itinerary') return true;
+    return false;
+  });
+
+  if (visiblePipeline.length === 0) return null;
+
+  return (
+    <div className="flex flex-wrap items-center gap-1 px-3 pb-2 text-xs">
+      {visiblePipeline.map((item, idx) => {
+        const status = toolStates.get(item.key) || 'pending';
+        return (
+          <span key={item.key} className="flex items-center gap-1">
+            {idx > 0 && <span className="text-zinc-300 dark:text-zinc-600">→</span>}
+            <span className={
+              status === 'completed'
+                ? 'text-green-600 dark:text-green-400'
+                : status === 'active'
+                  ? 'text-blue-600 font-medium animate-pulse dark:text-blue-400'
+                  : 'text-zinc-400 dark:text-zinc-500'
+            }>
+              {status === 'completed' ? '✓' : status === 'active' ? '●' : '○'}
+              {' '}
+              {item.label}
+            </span>
+          </span>
+        );
+      })}
     </div>
   );
 }

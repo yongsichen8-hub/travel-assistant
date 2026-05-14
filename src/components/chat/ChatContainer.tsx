@@ -212,7 +212,7 @@ function MessageItem({ message, isStreaming, onSelectFlight }: { message: UIMess
 
   // --- Assistant 消息：提取工具调用步骤 ---
   if (!isUser) {
-    const toolSteps: Array<{ toolName: string; state: string }> = [];
+    const toolSteps: Array<{ toolName: string; state: string; input?: Record<string, unknown> }> = [];
     // 按调用分组收集航班结果（去程/回程分别展示）
     const flightGroups: Array<{ flights: FlightData[] }> = [];
 
@@ -223,7 +223,8 @@ function MessageItem({ message, isStreaming, onSelectFlight }: { message: UIMess
 
       const toolName = type.replace('tool-', '');
       const state = ('state' in part ? part.state : 'unknown') as string;
-      toolSteps.push({ toolName, state });
+      const input = ('input' in part ? part.input : undefined) as Record<string, unknown> | undefined;
+      toolSteps.push({ toolName, state, input });
 
       // 收集航班结果（每次 search_flights 调用为独立分组）
       if (
