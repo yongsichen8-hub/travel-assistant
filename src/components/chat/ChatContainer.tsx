@@ -157,6 +157,9 @@ export function ChatContainer({
             message={message}
             allMessages={uniqueMessages}
             isStreaming={isLoading && idx === uniqueMessages.length - 1 && message.role === 'assistant'}
+            onSelectFlight={(flight) => {
+              handleSend(`我选择航班 ${flight.flightNo}（${flight.airline} ${flight.departureTime}-${flight.arrivalTime}, ${flight.departureAirport}→${flight.arrivalAirport}），请据此重新规划行程`);
+            }}
           />
         ))}
 
@@ -257,10 +260,12 @@ function MessageItem({
   message,
   allMessages,
   isStreaming,
+  onSelectFlight,
 }: {
   message: UIMessage;
   allMessages: UIMessage[];
   isStreaming: boolean;
+  onSelectFlight: (flight: FlightData) => void;
 }) {
   const isUser = message.role === 'user';
 
@@ -361,7 +366,7 @@ function MessageItem({
               )}
               <div className="grid gap-2">
                 {group.flights.slice(0, 5).map((flight, idx) => (
-                  <FlightCard key={`${groupIdx}-${flight.flightNo}-${flight.departureTime}-${idx}`} flight={flight} />
+                  <FlightCard key={`${groupIdx}-${flight.flightNo}-${flight.departureTime}-${idx}`} flight={flight} onSelect={onSelectFlight} />
                 ))}
               </div>
             </div>
