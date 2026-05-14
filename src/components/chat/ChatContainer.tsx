@@ -8,19 +8,21 @@ import { MessageBubble } from './MessageBubble';
 import { ToolCallIndicator } from './ToolCallIndicator';
 import { ThinkingProcess } from '@/components/ui/ThinkingProcess';
 import { FlightCard, parseFlightsFromToolResult, type FlightData } from '@/components/ui/FlightCard';
+import { InteractiveItineraryCard } from '@/components/itinerary/InteractiveItineraryCard';
+import { ItinerarySchema } from '@/lib/agent/schemas';
 import { useTravelConfig } from '@/lib/config/travel-config-context';
 import { useChatStore } from '@/lib/store/chat-store';
 import type { UIMessage } from 'ai';
+import type { Itinerary } from '@/lib/types/itinerary';
 import type { ResolvedTravelConfig } from '@/lib/types/travel-config';
+import type { FlightCandidateGroup, HotelCandidate } from '@/lib/types/itinerary-card';
 
 export function ChatContainer({
   sessionId,
   initialMessages,
-  onItineraryReady,
 }: {
   sessionId: string;
   initialMessages: UIMessage[];
-  onItineraryReady: (itinerary: unknown) => void;
 }) {
   const { config, resolvedConfig, setActiveProfile } = useTravelConfig();
   const { updateSessionMessages } = useChatStore();
@@ -36,7 +38,6 @@ export function ChatContainer({
     messages: initialMessagesRef.current,
   });
 
-  const lastItineraryIdRef = useRef<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const isNearBottomRef = useRef(true);
@@ -76,31 +77,6 @@ export function ChatContainer({
       }
     };
   }, [uniqueMessages, sessionId, updateSessionMessages]);
-
-  // 从消息中提取最新的行程数据（使用 useEffect 避免渲染中更新父状态）
-  useEffect(() => {
-    for (const msg of [...uniqueMessages].reverse()) {
-      if (msg.role !== 'assistant') continue;
-      for (const part of msg.parts) {
-        if (
-          'type' in part &&
-          part.type === 'tool-generate_final_itinerary' &&
-          'state' in part &&
-          part.state === 'output-available' &&
-          'output' in part &&
-          'toolCallId' in part
-        ) {
-          const callId = (part as { toolCallId: string }).toolCallId;
-          if (callId !== lastItineraryIdRef.current) {
-            lastItineraryIdRef.current = callId;
-            onItineraryReady(part.output);
-          }
-          return;
-        }
-      }
-      break;
-    }
-  }, [uniqueMessages, onItineraryReady]);
 
   // 监听滚动：判断用户是否在底部附近（150px 阈值）
   const handleScroll = useCallback(() => {
@@ -179,6 +155,7 @@ export function ChatContainer({
           <MessageItem
             key={`${message.id}-${idx}`}
             message={message}
+            allMessages={uniqueMessages}
             isStreaming={isLoading && idx === uniqueMessages.length - 1 && message.role === 'assistant'}
             onSelectFlight={(flight) => {
               handleSend(`我选择航班 ${flight.flightNo}（${flight.airline} ${flight.departureTime}-${flight.arrivalTime}, ${flight.departureAirport}→${flight.arrivalAirport}），请据此重新规划行程`);
@@ -199,7 +176,97 @@ export function ChatContainer({
   );
 }
 
-function MessageItem({ message, isStreaming, onSelectFlight }: { message: UIMessage; isStreaming: boolean; onSelectFlight: (flight: FlightData) => void }) {
+/**
+ * 从所有历史消息中收集航班和酒店候选数据
+ * 按 itinerary.destination 过滤，避免跨行程数据污染
+ */
+function collectCandidates(
+  allMessages: UIMessage[],
+  itinerary: Itinerary
+): { flightGroups: FlightCandidateGroup[]; hotelCandidates: HotelCandidate[] } {
+  const destination = itinerary.destination.name;
+  const flightGroups: FlightCandidateGroup[] = [];
+  const hotelCandidates: HotelCandidate[] = [];
+
+  for (const msg of allMessages) {
+    if (msg.role !== 'assistant') continue;
+    for (const part of msg.parts) {
+      if (!('type' in part)) continue;
+      const type = part.type as string;
+      if (!type.startsWith('tool-')) continue;
+
+      const toolName = type.replace('tool-', '');
+      const state = ('state' in part ? part.state : '') as string;
+      if (state !== 'output-available') continue;
+
+      if (toolName === 'search_flights' && 'output' in part && 'input' in part) {
+        const input = part.input as { departure_city?: string; arrival_city?: string; date?: string } | undefined;
+        if (!input?.departure_city || !input?.arrival_city) continue;
+
+        // 按目的地过滤: 只保留和当前行程目的地相关的航班
+        const depCity = input.departure_city;
+        const arrCity = input.arrival_city;
+        if (!arrCity.includes(destination) && !destination.includes(arrCity) &&
+            !depCity.includes(destination) && !destination.includes(depCity)) {
+          continue;
+        }
+
+        const parsed = parseFlightsFromToolResult((part as { output: unknown }).output);
+        if (parsed.length === 0) continue;
+
+        // 动态判定方向：到达城市包含目的地 → 去程，出发城市包含目的地 → 返程
+        let direction: 'outbound' | 'return' | 'unknown' = 'unknown';
+        if (arrCity.includes(destination) || destination.includes(arrCity)) {
+          direction = 'outbound';
+        } else if (depCity.includes(destination) || destination.includes(depCity)) {
+          direction = 'return';
+        }
+
+        flightGroups.push({
+          direction,
+          departureCity: depCity,
+          arrivalCity: arrCity,
+          date: input.date || '',
+          flights: parsed,
+        });
+      }
+
+      if (toolName === 'search_nearby_hotels' && 'output' in part) {
+        try {
+          const raw = (part as { output: unknown }).output;
+          const data = typeof raw === 'string' ? JSON.parse(raw) : raw;
+          if (data?.hotels && Array.isArray(data.hotels)) {
+            for (const h of data.hotels) {
+              hotelCandidates.push({
+                name: h.name || '',
+                address: h.address || '',
+                distance: h.distance || '',
+                price: h.price || '暂无',
+                rating: h.rating || '',
+              });
+            }
+          }
+        } catch {
+          // JSON 解析失败，跳过
+        }
+      }
+    }
+  }
+
+  return { flightGroups, hotelCandidates };
+}
+
+function MessageItem({
+  message,
+  allMessages,
+  isStreaming,
+  onSelectFlight,
+}: {
+  message: UIMessage;
+  allMessages: UIMessage[];
+  isStreaming: boolean;
+  onSelectFlight: (flight: FlightData) => void;
+}) {
   const isUser = message.role === 'user';
 
   // 提取文本内容
@@ -213,8 +280,8 @@ function MessageItem({ message, isStreaming, onSelectFlight }: { message: UIMess
   // --- Assistant 消息：提取工具调用步骤 ---
   if (!isUser) {
     const toolSteps: Array<{ toolName: string; state: string; input?: Record<string, unknown> }> = [];
-    // 按调用分组收集航班结果（去程/回程分别展示）
     const flightGroups: Array<{ flights: FlightData[] }> = [];
+    let itineraryData: Itinerary | null = null;
 
     for (const part of message.parts) {
       if (!('type' in part)) continue;
@@ -226,7 +293,7 @@ function MessageItem({ message, isStreaming, onSelectFlight }: { message: UIMess
       const input = ('input' in part ? part.input : undefined) as Record<string, unknown> | undefined;
       toolSteps.push({ toolName, state, input });
 
-      // 收集航班结果（每次 search_flights 调用为独立分组）
+      // 收集航班结果（用于消息内展示 FlightCard）
       if (
         toolName === 'search_flights' &&
         state === 'output-available' &&
@@ -237,9 +304,43 @@ function MessageItem({ message, isStreaming, onSelectFlight }: { message: UIMess
           flightGroups.push({ flights: parsed });
         }
       }
+
+      // 检测 generate_final_itinerary 输出
+      if (
+        toolName === 'generate_final_itinerary' &&
+        state === 'output-available' &&
+        'output' in part
+      ) {
+        const result = ItinerarySchema.safeParse((part as { output: unknown }).output);
+        if (result.success) {
+          itineraryData = result.data;
+        }
+      }
     }
 
     const hasToolSteps = toolSteps.length > 0;
+
+    // 如果有行程卡片，收集候选数据并渲染 InteractiveItineraryCard
+    if (itineraryData) {
+      const { flightGroups: candidateFlights, hotelCandidates } = collectCandidates(allMessages, itineraryData);
+
+      return (
+        <div className="flex justify-start">
+          <div className="w-full max-w-[95%] space-y-2">
+            {/* 思考流折叠面板 */}
+            {hasToolSteps && (
+              <ThinkingProcess steps={toolSteps} isStreaming={isStreaming} />
+            )}
+            {/* 交互式行程卡片（替代 Markdown） */}
+            <InteractiveItineraryCard
+              itinerary={itineraryData}
+              flightGroups={candidateFlights}
+              hotelCandidates={hotelCandidates}
+            />
+          </div>
+        </div>
+      );
+    }
 
     return (
       <div className="flex justify-start">
