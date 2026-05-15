@@ -7,7 +7,7 @@ import { ChatInput } from './ChatInput';
 import { MessageBubble } from './MessageBubble';
 import { ToolCallIndicator } from './ToolCallIndicator';
 import { ThinkingProcess } from '@/components/ui/ThinkingProcess';
-import { FlightCard, parseFlightsFromToolResult, type FlightData } from '@/components/ui/FlightCard';
+import { parseFlightsFromToolResult, type FlightData } from '@/components/ui/FlightCard';
 import { InteractiveItineraryCard } from '@/components/itinerary/InteractiveItineraryCard';
 import { ItinerarySchema } from '@/lib/agent/schemas';
 import { useTravelConfig } from '@/lib/config/travel-config-context';
@@ -157,9 +157,6 @@ export function ChatContainer({
             message={message}
             allMessages={uniqueMessages}
             isStreaming={isLoading && idx === uniqueMessages.length - 1 && message.role === 'assistant'}
-            onSelectFlight={(flight) => {
-              handleSend(`我选择航班 ${flight.flightNo}（${flight.airline} ${flight.departureTime}-${flight.arrivalTime}, ${flight.departureAirport}→${flight.arrivalAirport}），请据此重新规划行程`);
-            }}
           />
         ))}
 
@@ -260,12 +257,10 @@ function MessageItem({
   message,
   allMessages,
   isStreaming,
-  onSelectFlight,
 }: {
   message: UIMessage;
   allMessages: UIMessage[];
   isStreaming: boolean;
-  onSelectFlight: (flight: FlightData) => void;
 }) {
   const isUser = message.role === 'user';
 
@@ -280,7 +275,6 @@ function MessageItem({
   // --- Assistant 消息：提取工具调用步骤 ---
   if (!isUser) {
     const toolSteps: Array<{ toolName: string; state: string; input?: Record<string, unknown> }> = [];
-    const flightGroups: Array<{ flights: FlightData[] }> = [];
     let itineraryData: Itinerary | null = null;
 
     for (const part of message.parts) {
@@ -292,18 +286,6 @@ function MessageItem({
       const state = ('state' in part ? part.state : 'unknown') as string;
       const input = ('input' in part ? part.input : undefined) as Record<string, unknown> | undefined;
       toolSteps.push({ toolName, state, input });
-
-      // 收集航班结果（用于消息内展示 FlightCard）
-      if (
-        toolName === 'search_flights' &&
-        state === 'output-available' &&
-        'output' in part
-      ) {
-        const parsed = parseFlightsFromToolResult((part as { output: unknown }).output);
-        if (parsed.length > 0) {
-          flightGroups.push({ flights: parsed });
-        }
-      }
 
       // 检测 generate_final_itinerary 输出
       if (
@@ -327,11 +309,9 @@ function MessageItem({
       return (
         <div className="flex justify-start">
           <div className="w-full max-w-[95%] space-y-2">
-            {/* 思考流折叠面板 */}
             {hasToolSteps && (
               <ThinkingProcess steps={toolSteps} isStreaming={isStreaming} />
             )}
-            {/* 交互式行程卡片（替代 Markdown） */}
             <InteractiveItineraryCard
               itinerary={itineraryData}
               flightGroups={candidateFlights}
@@ -345,32 +325,13 @@ function MessageItem({
     return (
       <div className="flex justify-start">
         <div className="max-w-[85%] space-y-2">
-          {/* 思考流折叠面板 */}
           {hasToolSteps && (
             <ThinkingProcess
               steps={toolSteps}
               isStreaming={isStreaming}
             />
           )}
-
-          {/* 文本内容 */}
           {text && <MessageBubble role="assistant" content={text} />}
-
-          {/* 航班卡片（按调用分组：去程/回程各自展示前5个） */}
-          {flightGroups.map((group, groupIdx) => (
-            <div key={`flight-group-${groupIdx}`} className="space-y-1.5">
-              {flightGroups.length > 1 && (
-                <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400 pl-1">
-                  {groupIdx === 0 ? '去程航班' : '回程航班'}
-                </p>
-              )}
-              <div className="grid gap-2">
-                {group.flights.slice(0, 5).map((flight, idx) => (
-                  <FlightCard key={`${groupIdx}-${flight.flightNo}-${flight.departureTime}-${idx}`} flight={flight} onSelect={onSelectFlight} />
-                ))}
-              </div>
-            </div>
-          ))}
         </div>
       </div>
     );

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useMemo, useCallback } from 'react';
+import { MapViewer } from './MapViewer';
 import type { Itinerary, Activity, FlightInfo } from '@/lib/types/itinerary';
 import type { FlightCandidateGroup, HotelCandidate } from '@/lib/types/itinerary-card';
 import type { FlightData } from '@/components/ui/FlightCard';
@@ -20,7 +21,8 @@ export function InteractiveItineraryCard({ itinerary, flightGroups, hotelCandida
   const [hotelOverrides, setHotelOverrides] = useState<Record<string, HotelCandidate>>({});
   const [sendStatus, setSendStatus] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
   const [sendError, setSendError] = useState<string | null>(null);
-  const [calendarWarning, setCalendarWarning] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<'timeline' | 'map'>('timeline');
+  const [selectedDay, setSelectedDay] = useState(0);
 
   // 获取目的地城市用于酒店搜索
   const destinationCity = itinerary.destination.name;
@@ -78,7 +80,6 @@ export function InteractiveItineraryCard({ itinerary, flightGroups, hotelCandida
     if (!user?.openId) return;
     setSendStatus('sending');
     setSendError(null);
-    setCalendarWarning(null);
 
     try {
       const res = await fetch(`${process.env.NEXT_PUBLIC_BASE_PATH || ''}/api/feishu/send-itinerary`, {
@@ -95,9 +96,6 @@ export function InteractiveItineraryCard({ itinerary, flightGroups, hotelCandida
       const data = await res.json();
       if (data.messageSent) {
         setSendStatus('sent');
-        if (data.calendarError) {
-          setCalendarWarning(data.calendarError);
-        }
       } else {
         throw new Error(data.error || '发送失败');
       }
@@ -138,22 +136,72 @@ export function InteractiveItineraryCard({ itinerary, flightGroups, hotelCandida
         )}
       </div>
 
-      {/* Day Timeline */}
-      <div className="divide-y divide-zinc-100 dark:divide-zinc-700">
-        {dirtyItinerary.days.map(day => (
-          <DaySection
-            key={day.dayNumber}
-            day={day}
-            flightGroups={flightGroups}
-            hotelCandidates={hotelCandidates}
-            flightOverrides={flightOverrides}
-            hotelOverrides={hotelOverrides}
-            destinationCity={destinationCity}
-            onFlightSwitch={handleFlightSwitch}
-            onHotelSwitch={handleHotelSwitch}
-          />
-        ))}
+      {/* 视图切换按钮组 */}
+      <div className="flex items-center gap-2 px-5 py-2 border-b border-zinc-100 dark:border-zinc-700">
+        <button
+          onClick={() => setViewMode('timeline')}
+          className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
+            viewMode === 'timeline'
+              ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300'
+              : 'text-zinc-500 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-700'
+          }`}
+        >
+          时间轴
+        </button>
+        <button
+          onClick={() => setViewMode('map')}
+          className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
+            viewMode === 'map'
+              ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300'
+              : 'text-zinc-500 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-700'
+          }`}
+        >
+          地图
+        </button>
       </div>
+
+      {/* Day Timeline / Map View */}
+      {viewMode === 'timeline' ? (
+        <div className="divide-y divide-zinc-100 dark:divide-zinc-700">
+          {dirtyItinerary.days.map(day => (
+            <DaySection
+              key={day.dayNumber}
+              day={day}
+              flightGroups={flightGroups}
+              hotelCandidates={hotelCandidates}
+              flightOverrides={flightOverrides}
+              hotelOverrides={hotelOverrides}
+              destinationCity={destinationCity}
+              onFlightSwitch={handleFlightSwitch}
+              onHotelSwitch={handleHotelSwitch}
+              isLoggedIn={!!user}
+            />
+          ))}
+        </div>
+      ) : (
+        <div className="px-5 py-4">
+          {/* 日期选择器 */}
+          <div className="flex gap-2 mb-3 overflow-x-auto">
+            {dirtyItinerary.days.map((day, idx) => (
+              <button
+                key={idx}
+                onClick={() => setSelectedDay(idx)}
+                className={`shrink-0 px-3 py-1 text-xs rounded-full transition-colors ${
+                  selectedDay === idx
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-700 dark:text-zinc-300'
+                }`}
+              >
+                Day {day.dayNumber}
+              </button>
+            ))}
+          </div>
+          {/* 地图 */}
+          <div className="h-80 rounded-lg overflow-hidden border border-zinc-200 dark:border-zinc-700">
+            <MapViewer days={dirtyItinerary.days} selectedDay={selectedDay} />
+          </div>
+        </div>
+      )}
 
       {/* Tips */}
       {dirtyItinerary.tips && dirtyItinerary.tips.length > 0 && (
@@ -177,19 +225,12 @@ export function InteractiveItineraryCard({ itinerary, flightGroups, hotelCandida
             请先登录飞书以发送行程
           </button>
         ) : sendStatus === 'sent' ? (
-          <div>
-            <button
-              disabled
-              className="w-full rounded-lg bg-green-100 px-4 py-2.5 text-sm font-medium text-green-700 dark:bg-green-900/30 dark:text-green-400"
-            >
-              已发送至飞书
-            </button>
-            {calendarWarning && (
-              <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">
-                {calendarWarning}
-              </p>
-            )}
-          </div>
+          <button
+            disabled
+            className="w-full rounded-lg bg-green-100 px-4 py-2.5 text-sm font-medium text-green-700 dark:bg-green-900/30 dark:text-green-400"
+          >
+            已发送至飞书
+          </button>
         ) : (
           <div>
             <button
@@ -220,6 +261,7 @@ function DaySection({
   destinationCity,
   onFlightSwitch,
   onHotelSwitch,
+  isLoggedIn,
 }: {
   day: Itinerary['days'][number];
   flightGroups: FlightCandidateGroup[];
@@ -229,6 +271,7 @@ function DaySection({
   destinationCity: string;
   onFlightSwitch: (activityId: string, flight: FlightData) => void;
   onHotelSwitch: (activityId: string, hotel: HotelCandidate) => void;
+  isLoggedIn: boolean;
 }) {
   return (
     <div className="px-5 py-4">
@@ -249,6 +292,7 @@ function DaySection({
           <ActivityRow
             key={activity.id}
             activity={activity}
+            date={day.date}
             flightGroups={flightGroups}
             hotelCandidates={hotelCandidates}
             flightOverride={flightOverrides[activity.id]}
@@ -256,6 +300,7 @@ function DaySection({
             destinationCity={destinationCity}
             onFlightSwitch={onFlightSwitch}
             onHotelSwitch={onHotelSwitch}
+            isLoggedIn={isLoggedIn}
           />
         ))}
       </div>
@@ -277,6 +322,7 @@ const ACTIVITY_ICONS: Record<string, string> = {
 
 function ActivityRow({
   activity,
+  date,
   flightGroups,
   hotelCandidates,
   flightOverride,
@@ -284,8 +330,10 @@ function ActivityRow({
   destinationCity,
   onFlightSwitch,
   onHotelSwitch,
+  isLoggedIn,
 }: {
   activity: Activity;
+  date: string;
   flightGroups: FlightCandidateGroup[];
   hotelCandidates: HotelCandidate[];
   flightOverride?: FlightData;
@@ -293,11 +341,55 @@ function ActivityRow({
   destinationCity: string;
   onFlightSwitch: (activityId: string, flight: FlightData) => void;
   onHotelSwitch: (activityId: string, hotel: HotelCandidate) => void;
+  isLoggedIn: boolean;
 }) {
+  const [calendarStatus, setCalendarStatus] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
+  const [calendarError, setCalendarError] = useState<string | null>(null);
+
+  const handleAddToCalendar = async () => {
+    setCalendarStatus('sending');
+    setCalendarError(null);
+    try {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_BASE_PATH || ''}/api/feishu/calendar-event`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          date,
+          startTime: activity.time,
+          endTime: activity.endTime || undefined,
+          title: activity.title,
+          description: activity.description || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setCalendarStatus('sent');
+      } else {
+        setCalendarStatus('error');
+        setCalendarError(data.error || '添加失败');
+      }
+    } catch (err) {
+      setCalendarStatus('error');
+      setCalendarError(err instanceof Error ? err.message : '网络错误');
+    }
+  };
+
   const icon = ACTIVITY_ICONS[activity.type] || '📍';
   const timeStr = activity.endTime
     ? `${activity.time} - ${activity.endTime}`
     : activity.time;
+
+  const relevantGroups = activity.type === 'flight' && activity.flight
+    ? flightGroups.filter(group => {
+        return (
+          group.departureCity.includes(activity.flight!.departureCity) ||
+          activity.flight!.departureCity.includes(group.departureCity)
+        ) && (
+          group.arrivalCity.includes(activity.flight!.arrivalCity) ||
+          activity.flight!.arrivalCity.includes(group.arrivalCity)
+        );
+      })
+    : flightGroups;
 
   return (
     <div className="relative">
@@ -309,6 +401,44 @@ function ActivityRow({
           <span className="text-sm">{icon}</span>
           <span className="text-xs text-zinc-400 dark:text-zinc-500">{timeStr}</span>
           <span className="text-sm font-medium text-zinc-800 dark:text-zinc-200">{activity.title}</span>
+          {/* 添加至飞书日历按钮 */}
+          {isLoggedIn && (
+            <button
+              onClick={handleAddToCalendar}
+              disabled={calendarStatus === 'sending'}
+              title={calendarStatus === 'error' && calendarError ? calendarError : calendarStatus === 'sent' ? '已添加至飞书日历' : '添加至飞书日历'}
+              className={`ml-auto shrink-0 p-1 rounded transition-colors ${
+                calendarStatus === 'idle'
+                  ? 'text-zinc-400 hover:text-blue-600 hover:bg-blue-50 dark:text-zinc-500 dark:hover:text-blue-400 dark:hover:bg-blue-900/30'
+                  : calendarStatus === 'sending'
+                  ? 'text-zinc-300 dark:text-zinc-600 animate-pulse'
+                  : calendarStatus === 'sent'
+                  ? 'text-green-600 dark:text-green-400'
+                  : 'text-red-500 hover:text-red-600 dark:text-red-400 dark:hover:text-red-300'
+              }`}
+            >
+              {calendarStatus === 'idle' && (
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5">
+                  <path fillRule="evenodd" d="M5.75 2a.75.75 0 01.75.75V4h7V2.75a.75.75 0 011.5 0V4h.25A2.75 2.75 0 0118 6.75v8.5A2.75 2.75 0 0115.25 18H4.75A2.75 2.75 0 012 15.25v-8.5A2.75 2.75 0 014.75 4H5V2.75A.75.75 0 015.75 2zm-1.5 5.5a1.25 1.25 0 100 2.5h11a1.25 1.25 0 100-2.5h-11z" clipRule="evenodd" />
+                </svg>
+              )}
+              {calendarStatus === 'sending' && (
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5">
+                  <path fillRule="evenodd" d="M5.75 2a.75.75 0 01.75.75V4h7V2.75a.75.75 0 011.5 0V4h.25A2.75 2.75 0 0118 6.75v8.5A2.75 2.75 0 0115.25 18H4.75A2.75 2.75 0 012 15.25v-8.5A2.75 2.75 0 014.75 4H5V2.75A.75.75 0 015.75 2zm-1.5 5.5a1.25 1.25 0 100 2.5h11a1.25 1.25 0 100-2.5h-11z" clipRule="evenodd" />
+                </svg>
+              )}
+              {calendarStatus === 'sent' && (
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5">
+                  <path fillRule="evenodd" d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z" clipRule="evenodd" />
+                </svg>
+              )}
+              {calendarStatus === 'error' && (
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.28 7.22a.75.75 0 00-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 101.06 1.06L10 11.06l1.72 1.72a.75.75 0 101.06-1.06L11.06 10l1.72-1.72a.75.75 0 00-1.06-1.06L10 8.94 8.28 7.22z" clipRule="evenodd" />
+                </svg>
+              )}
+            </button>
+          )}
         </div>
 
         {activity.description && (
@@ -321,7 +451,7 @@ function ActivityRow({
             <FlightSwitcher
               activityId={activity.id}
               currentFlight={activity.flight}
-              candidates={flightGroups}
+              candidates={relevantGroups}
               currentOverride={flightOverride}
               onSwitch={(flight) => onFlightSwitch(activity.id, flight)}
             />
