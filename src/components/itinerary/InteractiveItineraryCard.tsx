@@ -345,10 +345,12 @@ function ActivityRow({
 }) {
   const [calendarStatus, setCalendarStatus] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
   const [calendarError, setCalendarError] = useState<string | null>(null);
+  const [isAuthExpired, setIsAuthExpired] = useState(false);
 
   const handleAddToCalendar = async () => {
     setCalendarStatus('sending');
     setCalendarError(null);
+    setIsAuthExpired(false);
     try {
       const res = await fetch(`${process.env.NEXT_PUBLIC_BASE_PATH || ''}/api/feishu/calendar-event`, {
         method: 'POST',
@@ -365,12 +367,16 @@ function ActivityRow({
       if (data.success) {
         setCalendarStatus('sent');
       } else {
+        const errMsg = data.error || '添加失败';
+        const authExpired = res.status === 401 || /过期|重新登录|token.*invalid|unauthorized/i.test(errMsg);
         setCalendarStatus('error');
-        setCalendarError(data.error || '添加失败');
+        setCalendarError(authExpired ? '授权已过期，请重新登录飞书' : errMsg);
+        setIsAuthExpired(authExpired);
       }
     } catch (err) {
       setCalendarStatus('error');
       setCalendarError(err instanceof Error ? err.message : '网络错误');
+      setIsAuthExpired(false);
     }
   };
 
@@ -438,6 +444,11 @@ function ActivityRow({
                 </svg>
               )}
             </button>
+          )}
+          {calendarStatus === 'error' && calendarError && (
+            <span className={`text-xs ${isAuthExpired ? 'text-amber-600 dark:text-amber-400' : 'text-red-500 dark:text-red-400'}`}>
+              {calendarError}
+            </span>
           )}
         </div>
 

@@ -61,7 +61,9 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
   const addProfile = useCallback((profile: Omit<TravelProfile, 'id'>) => {
     const newProfile: TravelProfile = {
       ...profile,
-      id: crypto.randomUUID(),
+      id: (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
     };
     setConfig((prev) => ({
       ...prev,
