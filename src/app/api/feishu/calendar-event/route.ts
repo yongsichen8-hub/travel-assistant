@@ -53,14 +53,7 @@ export async function POST(req: Request) {
       );
     }
 
-    // 获取用户主日历 ID
-    const calendarId = await getPrimaryCalendarId(userAccessToken);
-    if (!calendarId) {
-      return Response.json(
-        { success: false, error: '无法获取用户主日历' },
-        { status: 500 }
-      );
-    }
+    // 直接使用飞书 primary 快捷方式作为 calendar_id
 
     // 构造精确时段的时间戳（非全天事件）
     const startTs = Math.floor(new Date(`${date}T${startTime}:00+08:00`).getTime() / 1000);
@@ -70,7 +63,7 @@ export async function POST(req: Request) {
 
     // 创建日历事件
     const res = await fetch(
-      `https://open.feishu.cn/open-apis/calendar/v4/calendars/${calendarId}/events`,
+      `https://open.feishu.cn/open-apis/calendar/v4/calendars/primary/events`,
       {
         method: 'POST',
         headers: {
@@ -120,22 +113,4 @@ function addOneHour(time: string): string {
   const [h, m] = time.split(':').map(Number);
   const newH = (h + 1) % 24;
   return `${String(newH).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
-}
-
-/**
- * 获取用户主日历 ID
- */
-async function getPrimaryCalendarId(userAccessToken: string): Promise<string | null> {
-  try {
-    const res = await fetch('https://open.feishu.cn/open-apis/calendar/v4/calendars/primary', {
-      headers: { Authorization: `Bearer ${userAccessToken}` },
-    });
-    const data = await res.json();
-    if (data.code === 0 && data.data?.calendars?.[0]?.calendar?.calendar_id) {
-      return data.data.calendars[0].calendar.calendar_id;
-    }
-    return data.data?.calendar?.calendar_id || null;
-  } catch {
-    return null;
-  }
 }
