@@ -133,6 +133,38 @@ async function searchAirport(
 
     console.log('[RapidAdapter] searchAirport HTTP Status:', response.status);
 
+    // ── 429 限流重试：等待 2 秒后重试 1 次 ──
+    if (response.status === 429) {
+      console.warn('[RapidAdapter] searchAirport 收到 429，等待 2 秒后重试...');
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      const retryRes = await fetch(url.toString(), {
+        method: 'GET',
+        headers: {
+          'x-rapidapi-host': API_HOST,
+          'x-rapidapi-key': apiKey,
+        },
+      });
+      console.log('[RapidAdapter] searchAirport 重试 HTTP Status:', retryRes.status);
+      if (retryRes.ok) {
+        const retryJson = await retryRes.json();
+        const retryResults: any[] =
+          retryJson?.data ?? retryJson?.results ?? (Array.isArray(retryJson) ? retryJson : []);
+        if (Array.isArray(retryResults) && retryResults.length > 0) {
+          const first = retryResults[0];
+          const skyId = first.skyId ?? first.navigation?.relevantFlightParams?.skyId ?? first.presentation?.skyId ?? '';
+          const entityId = first.entityId ?? first.navigation?.relevantFlightParams?.entityId ?? first.presentation?.entityId ?? '';
+          const cityName = first.presentation?.title ?? first.name ?? first.cityName ?? '';
+          if (skyId && entityId) {
+            console.log(`[RapidAdapter] searchAirport 重试成功: query=${query} → skyId=${skyId}, entityId=${entityId}`);
+            return { skyId, entityId, cityName };
+          }
+        }
+      }
+      const retryBody = await retryRes.text().catch(() => '');
+      console.error(`[RapidAdapter] searchAirport 重试仍失败: HTTP ${retryRes.status} | body: ${retryBody.substring(0, 300)}`);
+      return null;
+    }
+
     if (!response.ok) {
       const body = await response.text().catch(() => '');
       console.error(
@@ -324,13 +356,10 @@ export async function fetchRapidFlights(
 
   console.log(`[RapidAdapter] 查询: ${departure_city}(${fromIATA}) → ${arrival_city}(${toIATA}), ${date}`);
 
-  // ── 步骤1: 通过 auto-complete 获取 skyId 和 entityId ──
-  const [originInfo, destInfo] = await Promise.all([
-    searchAirport(departure_city, apiKey),
-    searchAirport(arrival_city, apiKey),
-  ]);
-
-  // ── 步骤1.5: 限流延迟，避免连续请求触发 429 ──
+  // ── 步骤1: 串行调用 auto-complete 获取 skyId 和 entityId（避免并发触发 429） ──
+  const originInfo = await searchAirport(departure_city, apiKey);
+  await new Promise(resolve => setTimeout(resolve, 1000));
+  const destInfo = await searchAirport(arrival_city, apiKey);
   await new Promise(resolve => setTimeout(resolve, 1000));
 
   // ── 步骤2: 构建请求 URL ──
@@ -340,11 +369,11 @@ export async function fetchRapidFlights(
     // 使用 auto-complete 返回的 skyId 和 entityId
     url.searchParams.set('originSkyId', originInfo.skyId);
     url.searchParams.set('destinationSkyId', destInfo.skyId);
-    url.searchParams.set('originEntityId', originInfo.entityId);
-    url.searchParams.set('destinationEntityId', destInfo.entityId);
+    url.searchParams.set('fromEntityId', originInfo.entityId);
+    url.searchParams.set('toEntityId', destInfo.entityId);
     url.searchParams.set('date', date);
     console.log(
-      `[RapidAdapter] 使用 auto-complete 参数: originSkyId=${originInfo.skyId}, originEntityId=${originInfo.entityId}, destSkyId=${destInfo.skyId}, destEntityId=${destInfo.entityId}`,
+      `[RapidAdapter] 使用 auto-complete 参数: originSkyId=${originInfo.skyId}, fromEntityId=${originInfo.entityId}, destSkyId=${destInfo.skyId}, toEntityId=${destInfo.entityId}`,
     );
   } else {
     // 降级：直接使用 IATA 码作为 fromEntityId/toEntityId
