@@ -112,6 +112,9 @@ async function searchAirport(
 ): Promise<AirportInfo | null> {
   const url = new URL(AUTO_COMPLETE_URL);
   url.searchParams.set('query', query);
+  url.searchParams.set('market', 'CN');
+  url.searchParams.set('locale', 'zh-CN');
+  url.searchParams.set('currency', 'CNY');
 
   try {
     const controller = new AbortController();
@@ -327,6 +330,9 @@ export async function fetchRapidFlights(
     searchAirport(arrival_city, apiKey),
   ]);
 
+  // ── 步骤1.5: 限流延迟，避免连续请求触发 429 ──
+  await new Promise(resolve => setTimeout(resolve, 1000));
+
   // ── 步骤2: 构建请求 URL ──
   const url = new URL(SEARCH_ONE_WAY_URL);
 
@@ -352,8 +358,8 @@ export async function fetchRapidFlights(
 
   url.searchParams.set('adults', '1');
   url.searchParams.set('currency', 'CNY');
-  url.searchParams.set('market', 'zh-CN');
-  url.searchParams.set('countryCode', 'CN');
+  url.searchParams.set('market', 'CN');
+  url.searchParams.set('locale', 'zh-CN');
   if (cabin_class) {
     url.searchParams.set('cabinClass', cabin_class);
   }
