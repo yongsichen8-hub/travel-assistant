@@ -10,9 +10,10 @@ interface Props {
   initialCandidates: HotelCandidate[];
   currentOverride?: HotelCandidate;
   onSwitch: (hotel: HotelCandidate) => void;
+  disabled?: boolean;
 }
 
-export function HotelSwitcher({ currentHotelName, city, initialCandidates, currentOverride, onSwitch }: Props) {
+export function HotelSwitcher({ currentHotelName, city, initialCandidates, currentOverride, onSwitch, disabled }: Props) {
   const [showSearch, setShowSearch] = useState(false);
   const [keyword, setKeyword] = useState('');
   const [results, setResults] = useState<HotelCandidate[]>(initialCandidates);
@@ -52,7 +53,8 @@ export function HotelSwitcher({ currentHotelName, city, initialCandidates, curre
         </span>
         <button
           onClick={() => setShowSearch(!showSearch)}
-          className="text-xs text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+          disabled={disabled}
+          className={`text-xs hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 ${disabled ? 'text-zinc-400 cursor-not-allowed' : 'text-blue-600'}`}
         >
           {showSearch ? '收起' : '更换酒店'}
         </button>
@@ -65,7 +67,7 @@ export function HotelSwitcher({ currentHotelName, city, initialCandidates, curre
       )}
 
       {/* 搜索面板 */}
-      {showSearch && (
+      {showSearch && !disabled && (
         <div className="mt-2 space-y-2">
           <div className="flex gap-1.5">
             <input

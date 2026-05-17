@@ -157,6 +157,7 @@ export function ChatContainer({
             message={message}
             allMessages={uniqueMessages}
             isStreaming={isLoading && idx === uniqueMessages.length - 1 && message.role === 'assistant'}
+            onRegenerateItinerary={handleSend}
           />
         ))}
 
@@ -257,10 +258,12 @@ function MessageItem({
   message,
   allMessages,
   isStreaming,
+  onRegenerateItinerary,
 }: {
   message: UIMessage;
   allMessages: UIMessage[];
   isStreaming: boolean;
+  onRegenerateItinerary: (message: string) => void;
 }) {
   const isUser = message.role === 'user';
 
@@ -316,6 +319,7 @@ function MessageItem({
               itinerary={itineraryData}
               flightGroups={candidateFlights}
               hotelCandidates={hotelCandidates}
+              onRegenerateItinerary={onRegenerateItinerary}
             />
           </div>
         </div>

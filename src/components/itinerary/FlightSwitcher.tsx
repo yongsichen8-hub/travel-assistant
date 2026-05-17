@@ -29,9 +29,10 @@ interface Props {
   currentOverride?: FlightData;
   onSwitch: (flight: FlightData) => void;
   aircraftMap?: Record<string, string>;
+  disabled?: boolean;
 }
 
-export function FlightSwitcher({ currentFlight, candidates, currentOverride, onSwitch, aircraftMap }: Props) {
+export function FlightSwitcher({ currentFlight, candidates, currentOverride, onSwitch, aircraftMap, disabled }: Props) {
   const hasCandidates = candidates.some(g => g.flights.length > 0);
 
   // 按时段分组所有航班
@@ -142,6 +143,7 @@ export function FlightSwitcher({ currentFlight, candidates, currentOverride, onS
                 key={key}
                 type="button"
                 onClick={() => setActiveTab(key)}
+                disabled={disabled}
                 className={isActive
                   ? 'bg-gray-700 text-white text-xs px-3 py-1 rounded-full'
                   : 'bg-gray-100 text-gray-500 text-xs px-3 py-1 rounded-full'
@@ -159,7 +161,8 @@ export function FlightSwitcher({ currentFlight, candidates, currentOverride, onS
         <select
           value={currentKey}
           onChange={handleChange}
-          className="w-full rounded border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-700 focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400 dark:border-zinc-600 dark:bg-zinc-700 dark:text-zinc-200"
+          disabled={disabled}
+          className={`w-full rounded border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-700 focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400 dark:border-zinc-600 dark:bg-zinc-700 dark:text-zinc-200 ${disabled ? 'opacity-50 cursor-not-allowed bg-zinc-50 dark:bg-zinc-800' : ''}`}
         >
           <option value="" disabled>切换航班...</option>
           {candidates.map((group, gi) => {

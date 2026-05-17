@@ -13,9 +13,10 @@ interface Props {
   itinerary: Itinerary;
   flightGroups: FlightCandidateGroup[];
   hotelCandidates: HotelCandidate[];
+  onRegenerateItinerary?: (message: string) => void;
 }
 
-export function InteractiveItineraryCard({ itinerary, flightGroups, hotelCandidates }: Props) {
+export function InteractiveItineraryCard({ itinerary, flightGroups, hotelCandidates, onRegenerateItinerary }: Props) {
   const { user } = useFeishuUser();
   const [flightOverrides, setFlightOverrides] = useState<Record<string, FlightData>>({});
   const [hotelOverrides, setHotelOverrides] = useState<Record<string, HotelCandidate>>({});
@@ -24,6 +25,23 @@ export function InteractiveItineraryCard({ itinerary, flightGroups, hotelCandida
   const [sendError, setSendError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'timeline' | 'map'>('timeline');
   const [selectedDay, setSelectedDay] = useState(0);
+
+  // Draft Mode 状态
+  const [isEditing, setIsEditing] = useState(false);
+  const [isRegenerating, setIsRegenerating] = useState(false);
+  const [draftModifications, setDraftModifications] = useState<{
+    flights?: Record<string, FlightData>;
+    hotel?: string;
+  }>({});
+
+  // 当父组件返回新数据时，自动清除 regenerating 和 draft 状态
+  useEffect(() => {
+    if (isRegenerating) {
+      setIsRegenerating(false);
+      setDraftModifications({});
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [itinerary]);
 
   // 获取目的地城市用于酒店搜索
   const destinationCity = itinerary.destination.name;
@@ -40,10 +58,10 @@ export function InteractiveItineraryCard({ itinerary, flightGroups, hotelCandida
       });
     });
 
-    // 异步获取机型（每次最多 10 个，避免过多请求）
+    // 异步获取机型（最多 60 个航班号，覆盖完整航班列表）
     const fetchAircraft = async () => {
       const entries: [string, string][] = [];
-      const batch = Array.from(flightNos).slice(0, 10);
+      const batch = Array.from(flightNos).slice(0, 60);
 
       for (const flightNo of batch) {
         try {
@@ -113,12 +131,28 @@ export function InteractiveItineraryCard({ itinerary, flightGroups, hotelCandida
   }, [itinerary, flightOverrides, hotelOverrides]);
 
   const handleFlightSwitch = useCallback((activityId: string, flight: FlightData) => {
-    setFlightOverrides(prev => ({ ...prev, [activityId]: flight }));
-  }, []);
+    if (isEditing) {
+      // 编辑模式：修改存入 draftModifications
+      setDraftModifications(prev => ({
+        ...prev,
+        flights: { ...prev.flights, [activityId]: flight },
+      }));
+    } else {
+      // 非编辑模式（不应出现，但做兜底）
+      setFlightOverrides(prev => ({ ...prev, [activityId]: flight }));
+    }
+  }, [isEditing]);
 
   const handleHotelSwitch = useCallback((activityId: string, hotel: HotelCandidate) => {
-    setHotelOverrides(prev => ({ ...prev, [activityId]: hotel }));
-  }, []);
+    if (isEditing) {
+      setDraftModifications(prev => ({
+        ...prev,
+        hotel: hotel.name,
+      }));
+    } else {
+      setHotelOverrides(prev => ({ ...prev, [activityId]: hotel }));
+    }
+  }, [isEditing]);
 
   const handleSendToFeishu = async () => {
     if (!user?.openId) return;
@@ -149,19 +183,142 @@ export function InteractiveItineraryCard({ itinerary, flightGroups, hotelCandida
     }
   };
 
+  // 构造重生成描述消息
+  const buildRegenerateMessage = useCallback((): string => {
+    const parts: string[] = [];
+
+    if (draftModifications.flights) {
+      for (const [activityId, flight] of Object.entries(draftModifications.flights)) {
+        // 找到对应 activity 以确定方向标签
+        let directionLabel = '航班';
+        for (const day of itinerary.days) {
+          const act = day.activities.find(a => a.id === activityId);
+          if (act) {
+            const group = flightGroups.find(g =>
+              g.departureCity.includes(act.flight?.departureCity || '') ||
+              act.flight?.departureCity.includes(g.departureCity)
+            );
+            if (group) {
+              directionLabel = group.direction === 'outbound' ? '去程航班' : group.direction === 'return' ? '返程航班' : '航班';
+            }
+            break;
+          }
+        }
+
+        let msg = `用户已将${directionLabel}修改为：[${flight.departureTime}-${flight.arrivalTime}] ${flight.flightNo} | ${flight.airline}`;
+        if (flight.price && flight.price > 0) msg += ` | ¥${flight.price}`;
+        if (flight.stops !== undefined) msg += ` | ${flight.stops === 0 ? '直飞' : `经停${flight.stops}`}`;
+        msg += '。请根据新的航班到达时间，重新合理规划当天的后续行程。';
+        parts.push(msg);
+      }
+    }
+
+    if (draftModifications.hotel) {
+      parts.push(`用户已将酒店修改为：${draftModifications.hotel}。请根据新酒店的位置，重新合理规划行程安排。`);
+    }
+
+    return parts.length > 0 ? parts.join('\n') : '';
+  }, [draftModifications, itinerary.days, flightGroups]);
+
+  // 确认修改
+  const handleConfirmEdit = useCallback(() => {
+    const message = buildRegenerateMessage();
+    if (!message) {
+      // 没有实际修改，直接退出编辑
+      setIsEditing(false);
+      setDraftModifications({});
+      return;
+    }
+
+    // 将 draft 中的航班/酒店修改应用到 overrides
+    if (draftModifications.flights) {
+      setFlightOverrides(prev => ({ ...prev, ...draftModifications.flights }));
+    }
+
+    // 调用回调通知父组件
+    onRegenerateItinerary?.(message);
+    setIsRegenerating(true);
+    setIsEditing(false);
+  }, [draftModifications, buildRegenerateMessage, onRegenerateItinerary]);
+
+  // 取消编辑
+  const handleCancelEdit = useCallback(() => {
+    setIsEditing(false);
+    setDraftModifications({});
+  }, []);
+
+  // 计算 dirty itinerary 中的航班覆盖：编辑模式下优先使用 draft 值
+  const effectiveFlightOverrides = useMemo(() => {
+    if (isEditing && draftModifications.flights) {
+      return { ...flightOverrides, ...draftModifications.flights };
+    }
+    return flightOverrides;
+  }, [isEditing, draftModifications.flights, flightOverrides]);
+
   // 预算
   const budget = dirtyItinerary.estimatedBudget;
 
   return (
-    <div className="w-full rounded-2xl border border-zinc-200 bg-white shadow-sm overflow-hidden dark:border-zinc-700 dark:bg-zinc-800">
+    <div className="relative w-full rounded-2xl border border-zinc-200 bg-white shadow-sm overflow-hidden dark:border-zinc-700 dark:bg-zinc-800">
+      {/* Loading 覆盖层 */}
+      {isRegenerating && (
+        <div className="absolute inset-0 bg-white/80 flex items-center justify-center z-10 rounded-lg">
+          <div className="flex items-center gap-2 text-gray-600 text-sm">
+            <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+            </svg>
+            重新规划中...
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="bg-gradient-to-r from-blue-50 to-indigo-50 px-5 py-4 dark:from-blue-950/30 dark:to-indigo-950/30">
-        <h2 className="text-lg font-bold text-zinc-900 dark:text-zinc-100">
-          {dirtyItinerary.title}
-        </h2>
-        <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-          {dirtyItinerary.startDate} ~ {dirtyItinerary.endDate}
-        </p>
+        <div className="flex items-start justify-between">
+          <div>
+            <h2 className="text-lg font-bold text-zinc-900 dark:text-zinc-100">
+              {dirtyItinerary.title}
+            </h2>
+            <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
+              {dirtyItinerary.startDate} ~ {dirtyItinerary.endDate}
+            </p>
+          </div>
+          {/* 修改行程 / 确认修改 / 取消 按钮 */}
+          <div className="flex items-center gap-2">
+            {isEditing && (
+              <button
+                onClick={handleCancelEdit}
+                className="text-gray-500 text-xs border border-gray-300 px-3 py-1 rounded hover:bg-gray-50"
+              >
+                取消
+              </button>
+            )}
+            {isRegenerating ? (
+              <span className="flex items-center gap-1 bg-blue-600 text-white text-xs px-3 py-1 rounded">
+                <svg className="animate-spin h-3 w-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                </svg>
+                重新规划中...
+              </span>
+            ) : isEditing ? (
+              <button
+                onClick={handleConfirmEdit}
+                className="bg-blue-600 text-white text-xs px-3 py-1 rounded hover:bg-blue-700"
+              >
+                确认修改
+              </button>
+            ) : (
+              <button
+                onClick={() => setIsEditing(true)}
+                className="text-gray-500 text-xs border border-gray-300 px-3 py-1 rounded hover:bg-gray-50"
+              >
+                修改行程
+              </button>
+            )}
+          </div>
+        </div>
         <div className="mt-2 flex flex-wrap gap-2">
           <span className="inline-flex items-center rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-medium text-blue-700 dark:bg-blue-900/50 dark:text-blue-300">
             {dirtyItinerary.origin.name} → {dirtyItinerary.destination.name}
@@ -213,13 +370,14 @@ export function InteractiveItineraryCard({ itinerary, flightGroups, hotelCandida
               day={day}
               flightGroups={flightGroups}
               hotelCandidates={hotelCandidates}
-              flightOverrides={flightOverrides}
+              flightOverrides={effectiveFlightOverrides}
               hotelOverrides={hotelOverrides}
               destinationCity={destinationCity}
               aircraftMap={aircraftMap}
               onFlightSwitch={handleFlightSwitch}
               onHotelSwitch={handleHotelSwitch}
               isLoggedIn={!!user}
+              isEditing={isEditing}
             />
           ))}
         </div>
@@ -308,6 +466,7 @@ function DaySection({
   onFlightSwitch,
   onHotelSwitch,
   isLoggedIn,
+  isEditing,
 }: {
   day: Itinerary['days'][number];
   flightGroups: FlightCandidateGroup[];
@@ -319,6 +478,7 @@ function DaySection({
   onFlightSwitch: (activityId: string, flight: FlightData) => void;
   onHotelSwitch: (activityId: string, hotel: HotelCandidate) => void;
   isLoggedIn: boolean;
+  isEditing: boolean;
 }) {
   return (
     <div className="px-5 py-4">
@@ -349,6 +509,7 @@ function DaySection({
             onFlightSwitch={onFlightSwitch}
             onHotelSwitch={onHotelSwitch}
             isLoggedIn={isLoggedIn}
+            isEditing={isEditing}
           />
         ))}
       </div>
@@ -380,6 +541,7 @@ function ActivityRow({
   onFlightSwitch,
   onHotelSwitch,
   isLoggedIn,
+  isEditing,
 }: {
   activity: Activity;
   date: string;
@@ -392,6 +554,7 @@ function ActivityRow({
   onFlightSwitch: (activityId: string, flight: FlightData) => void;
   onHotelSwitch: (activityId: string, hotel: HotelCandidate) => void;
   isLoggedIn: boolean;
+  isEditing: boolean;
 }) {
   const [calendarStatus, setCalendarStatus] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
   const [calendarError, setCalendarError] = useState<string | null>(null);
@@ -516,6 +679,7 @@ function ActivityRow({
               currentOverride={flightOverride}
               onSwitch={(flight) => onFlightSwitch(activity.id, flight)}
               aircraftMap={aircraftMap}
+              disabled={!isEditing}
             />
           </div>
         )}
@@ -530,6 +694,7 @@ function ActivityRow({
               initialCandidates={hotelCandidates}
               currentOverride={hotelOverride}
               onSwitch={(hotel) => onHotelSwitch(activity.id, hotel)}
+              disabled={!isEditing}
             />
           </div>
         )}
