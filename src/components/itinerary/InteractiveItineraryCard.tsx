@@ -44,15 +44,24 @@ export function InteractiveItineraryCard({ itinerary, flightGroups, hotelCandida
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [itinerary]);
 
-  // 当聊天加载从 true 变为 false 时（AI回复完成），清除 isRegenerating
-  // 解决：重生成时 AI 回复出现在新消息组件中，本组件的 itinerary prop 不变，导致卡住
-  const prevIsChatLoadingRef = useRef(false);
+  // 当聊天加载状态变化时，重置 isRegenerating
+  // 使用 hasSeenLoadingRef 跟踪本次重生成是否出现过 loading，
+  // 解决 React 批处理导致 isChatLoading 的 true→false 过渡被跳帧的问题
+  const hasSeenLoadingRef = useRef(false);
   useEffect(() => {
-    if (isRegenerating && prevIsChatLoadingRef.current && !isChatLoading) {
-      setIsRegenerating(false);
-      setDraftModifications({});
+    if (isRegenerating) {
+      if (isChatLoading) {
+        hasSeenLoadingRef.current = true;
+      }
+      // 一旦出现过 loading 且现在已结束，立即重置
+      if (hasSeenLoadingRef.current && !isChatLoading) {
+        setIsRegenerating(false);
+        setDraftModifications({});
+        hasSeenLoadingRef.current = false;
+      }
+    } else {
+      hasSeenLoadingRef.current = false;
     }
-    prevIsChatLoadingRef.current = !!isChatLoading;
   }, [isChatLoading, isRegenerating]);
 
   // 获取目的地城市用于酒店搜索
@@ -156,13 +165,14 @@ export function InteractiveItineraryCard({ itinerary, flightGroups, hotelCandida
   }, [isEditing]);
 
   const handleHotelSwitch = useCallback((activityId: string, hotel: HotelCandidate) => {
+    // 酒店始终直接应用（无需编辑模式），确保点击后立即生效
+    setHotelOverrides(prev => ({ ...prev, [activityId]: hotel }));
     if (isEditing) {
+      // 编辑模式下同时记录到 draft，用于重生成消息
       setDraftModifications(prev => ({
         ...prev,
         hotel: hotel.name,
       }));
-    } else {
-      setHotelOverrides(prev => ({ ...prev, [activityId]: hotel }));
     }
   }, [isEditing]);
 
@@ -242,10 +252,11 @@ export function InteractiveItineraryCard({ itinerary, flightGroups, hotelCandida
       return;
     }
 
-    // 将 draft 中的航班/酒店修改应用到 overrides
+    // 将 draft 中的航班修改应用到 overrides
     if (draftModifications.flights) {
       setFlightOverrides(prev => ({ ...prev, ...draftModifications.flights }));
     }
+    // 酒店修改已在 handleHotelSwitch 中直接应用到 hotelOverrides，无需再次 apply
 
     // 调用回调通知父组件
     onRegenerateItinerary?.(message);

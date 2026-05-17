@@ -231,30 +231,30 @@ function mapItemToFlightResult(item: FliggyItem): FlightResult | null {
 // ─── 主函数 ───
 
 /**
- * 通过飞猪 MCP 搜索航班（分页循环，最多5页共50条）
+ * 通过飞猪 MCP 搜索航班（单次请求 + 去重）
+ *
+ * 飞猪 API 不支持分页，多次请求返回相同数据导致重复，
+ * 因此改为单次请求并对结果去重。
  *
  * @param params 航班搜索参数
  * @returns FlightResult[] 航班结果数组，失败时返回空数组
  */
 export async function fetchFliggyFlights(params: FlightSearchParams): Promise<FlightResult[]> {
-  const allResults: FlightResult[] = [];
-  const maxPages = 5; // 最多请求5页，共50条
+  const results = await fetchFliggyFlightsPage(params, 1);
 
-  for (let page = 1; page <= maxPages; page++) {
-    const pageResults = await fetchFliggyFlightsPage(params, page);
-    allResults.push(...pageResults);
+  console.log(`[FliggyAdapter] 获取到 ${results.length} 趟航班`);
 
-    console.log(`[FliggyAdapter] 第${page}页获取到 ${pageResults.length} 趟航班`);
+  // 去重：基于航班号+起飞时间（飞猪API不支持分页，多页返回相同数据）
+  const seen = new Set<string>();
+  const uniqueFlights = results.filter(flight => {
+    const key = `${flight.flightNo}-${flight.departureTime}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 
-    // 如果本页返回少于10条，说明没有更多数据了
-    if (pageResults.length < 10) break;
-
-    // 请求间隔避免限流
-    if (page < maxPages) await new Promise(r => setTimeout(r, 200));
-  }
-
-  console.log(`[FliggyAdapter] 分页合计获取到 ${allResults.length} 趟航班`);
-  return allResults;
+  console.log(`[FliggyAdapter] 去重后 ${uniqueFlights.length} 趟航班`);
+  return uniqueFlights;
 }
 
 /**
