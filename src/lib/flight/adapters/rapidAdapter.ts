@@ -15,6 +15,7 @@ import { cityToIATA, iataToCity, iataToAirportName } from '../airports';
 
 const API_HOST = 'flights-sky.p.rapidapi.com';
 const SEARCH_ONE_WAY_URL = `https://${API_HOST}/flights/search-one-way`;
+const AUTO_COMPLETE_URL = `https://${API_HOST}/flights/auto-complete`;
 const TIMEOUT_MS = 15_000;
 
 /**
@@ -93,6 +94,103 @@ function extractFlightNo(leg: any, fallbackIdx: number): string {
   return `RAP${String(fallbackIdx).padStart(4, '0')}`;
 }
 
+// ─── 机场查询 ───
+
+interface AirportInfo {
+  skyId: string;
+  entityId: string;
+  cityName?: string;
+}
+
+/**
+ * 调用 auto-complete 端点获取地点的 skyId 和 entityId
+ * 这些 ID 是 search-one-way 端点的必填参数
+ */
+async function searchAirport(
+  query: string,
+  apiKey: string,
+): Promise<AirportInfo | null> {
+  const url = new URL(AUTO_COMPLETE_URL);
+  url.searchParams.set('query', query);
+
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8_000);
+
+    const response = await fetch(url.toString(), {
+      method: 'GET',
+      headers: {
+        'x-rapidapi-host': API_HOST,
+        'x-rapidapi-key': apiKey,
+      },
+      signal: controller.signal,
+    });
+
+    clearTimeout(timer);
+
+    console.log('[RapidAdapter] searchAirport HTTP Status:', response.status);
+
+    if (!response.ok) {
+      const body = await response.text().catch(() => '');
+      console.error(
+        `[RapidAdapter] searchAirport 失败: HTTP ${response.status} | body: ${body.substring(0, 300)}`,
+      );
+      return null;
+    }
+
+    const json = await response.json();
+    console.log(
+      '[RapidAdapter] searchAirport 响应:',
+      JSON.stringify(json).substring(0, 500),
+    );
+
+    // 适配多种响应结构
+    const results: any[] =
+      json?.data ?? json?.results ?? (Array.isArray(json) ? json : []);
+
+    if (!Array.isArray(results) || results.length === 0) {
+      console.warn('[RapidAdapter] searchAirport 未找到结果:', query);
+      return null;
+    }
+
+    const first = results[0];
+
+    // 尝试多种路径提取 skyId 和 entityId
+    const skyId =
+      first.skyId ??
+      first.navigation?.relevantFlightParams?.skyId ??
+      first.presentation?.skyId ??
+      '';
+    const entityId =
+      first.entityId ??
+      first.navigation?.relevantFlightParams?.entityId ??
+      first.presentation?.entityId ??
+      '';
+    const cityName =
+      first.presentation?.title ?? first.name ?? first.cityName ?? '';
+
+    if (!skyId || !entityId) {
+      console.warn(
+        `[RapidAdapter] searchAirport 结果缺少 skyId/entityId:`,
+        JSON.stringify(first).substring(0, 300),
+      );
+      return null;
+    }
+
+    console.log(
+      `[RapidAdapter] searchAirport 匹配: query=${query} → skyId=${skyId}, entityId=${entityId}, cityName=${cityName}`,
+    );
+    return { skyId, entityId, cityName };
+  } catch (error: any) {
+    if (error.name === 'AbortError') {
+      console.warn('[RapidAdapter] searchAirport 超时（8s）:', query);
+    } else {
+      console.warn('[RapidAdapter] searchAirport 异常:', error.message || error);
+    }
+    return null;
+  }
+}
+
 // ─── 响应解析 ───
 
 /**
@@ -114,6 +212,13 @@ function parseResponse(
 
   if (!Array.isArray(itineraries) || itineraries.length === 0) {
     console.log('[RapidAdapter] 响应中未找到 itineraries，顶层 keys:', Object.keys(json || {}));
+    // 打印错误详情以便排查
+    if (json?.errors) {
+      console.log('[RapidAdapter] API错误详情:', JSON.stringify(json.errors, null, 2));
+    }
+    if (json?.message) {
+      console.log('[RapidAdapter] API消息:', JSON.stringify(json.message, null, 2));
+    }
     return [];
   }
 
@@ -216,11 +321,35 @@ export async function fetchRapidFlights(
 
   console.log(`[RapidAdapter] 查询: ${departure_city}(${fromIATA}) → ${arrival_city}(${toIATA}), ${date}`);
 
-  // 构建请求 URL
+  // ── 步骤1: 通过 auto-complete 获取 skyId 和 entityId ──
+  const [originInfo, destInfo] = await Promise.all([
+    searchAirport(departure_city, apiKey),
+    searchAirport(arrival_city, apiKey),
+  ]);
+
+  // ── 步骤2: 构建请求 URL ──
   const url = new URL(SEARCH_ONE_WAY_URL);
-  url.searchParams.set('fromEntityId', fromIATA);
-  url.searchParams.set('toEntityId', toIATA);
-  url.searchParams.set('departDate', date);
+
+  if (originInfo && destInfo) {
+    // 使用 auto-complete 返回的 skyId 和 entityId
+    url.searchParams.set('originSkyId', originInfo.skyId);
+    url.searchParams.set('destinationSkyId', destInfo.skyId);
+    url.searchParams.set('originEntityId', originInfo.entityId);
+    url.searchParams.set('destinationEntityId', destInfo.entityId);
+    url.searchParams.set('date', date);
+    console.log(
+      `[RapidAdapter] 使用 auto-complete 参数: originSkyId=${originInfo.skyId}, originEntityId=${originInfo.entityId}, destSkyId=${destInfo.skyId}, destEntityId=${destInfo.entityId}`,
+    );
+  } else {
+    // 降级：直接使用 IATA 码作为 fromEntityId/toEntityId
+    url.searchParams.set('fromEntityId', fromIATA);
+    url.searchParams.set('toEntityId', toIATA);
+    url.searchParams.set('departDate', date);
+    console.log(
+      `[RapidAdapter] auto-complete 失败，降级使用 IATA 码: fromEntityId=${fromIATA}, toEntityId=${toIATA}`,
+    );
+  }
+
   url.searchParams.set('adults', '1');
   url.searchParams.set('currency', 'CNY');
   url.searchParams.set('market', 'zh-CN');
@@ -244,13 +373,28 @@ export async function fetchRapidFlights(
 
     clearTimeout(timer);
 
+    // ── HTTP 状态码日志 ──
+    console.log('[RapidAdapter] HTTP Status:', response.status, response.statusText);
+
     if (!response.ok) {
-      console.error(`[RapidAdapter] HTTP ${response.status}: ${response.statusText}`);
+      const errorBody = await response.text().catch(() => '');
+      console.error(
+        `[RapidAdapter] HTTP 错误: ${response.status} ${response.statusText} | body: ${errorBody.substring(0, 500)}`,
+      );
       return [];
     }
 
     const json = await response.json();
     console.log('[RapidAdapter] 响应状态:', json.status, '| 顶层 keys:', Object.keys(json));
+    console.log('[RapidAdapter] 完整响应体:', JSON.stringify(json).substring(0, 500));
+
+    // 如果响应包含错误字段，打印详细错误信息
+    if (json?.errors) {
+      console.log('[RapidAdapter] API错误详情:', JSON.stringify(json.errors, null, 2));
+    }
+    if (json?.message) {
+      console.log('[RapidAdapter] API消息:', JSON.stringify(json.message, null, 2));
+    }
 
     const flights = parseResponse(json, departure_city, arrival_city);
     console.log(`[RapidAdapter] 解析到 ${flights.length} 趟航班`);
