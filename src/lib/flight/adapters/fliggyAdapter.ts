@@ -39,7 +39,7 @@ function generateSignature(bodyStr: string, timestamp: string, nonce: string): s
 
   const payload = `${method}\n${path}\n${timestamp}\n${nonce}\n${bodyHash}\n${authHash}`;
 
-  return crypto.createHmac('sha256', DEFAULT_SIGN_SECRET).update(payload, 'utf8').digest('hex');
+  return crypto.createHmac('sha256', DEFAULT_SIGN_SECRET).update(payload, 'utf8').digest('base64url').replace(/=+$/, '');
 }
 
 // ─── 设备指纹 ───
