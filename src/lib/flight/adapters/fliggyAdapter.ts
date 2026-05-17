@@ -24,104 +24,51 @@ const DEFAULT_SIGN_SECRET = 'XSbdYnucPARDc9knhD8+X6hxdD1Nh6ZGI6Hadg25kBw=';
 // ─── 签名计算 ───
 
 /**
- * 计算 HMAC-SHA256 签名
+ * 签名生成引擎 (严格对齐 Python hashlib)
  *
- * sign_string = "POST\n/mcp\n{timestamp}\n{nonce}\n{sha256_of_body}\n{sha256_of_auth_header}\n"
- * signature = HMAC-SHA256(sign_secret.encode(utf-8), sign_string)
- * result = base64url_encode(signature) 去除末尾 '='
+ * sign_string = "POST\n/mcp\n{timestamp}\n{nonce}\n{sha256_of_body}\n{sha256_of_auth_header}"
+ * signature = HMAC-SHA256(sign_secret, sign_string) → hex
  */
-function computeSignature(
-  body: string,
-  timestamp: string,
-  nonce: string,
-  apiKey: string,
-  signSecret: string,
-): string {
-  const bodyHash = crypto.createHash('sha256').update(body).digest('hex');
-  const authHeader = `Bearer ${apiKey}`;
-  const authHash = crypto.createHash('sha256').update(authHeader).digest('hex');
+function generateSignature(bodyStr: string, timestamp: string, nonce: string): string {
+  const method = 'POST';
+  const path = '/mcp';
+  const authHeader = `Bearer ${DEFAULT_API_KEY}`;
 
-  const signString = `POST\n/mcp\n${timestamp}\n${nonce}\n${bodyHash}\n${authHash}\n`;
+  const bodyHash = crypto.createHash('sha256').update(bodyStr, 'utf8').digest('hex');
+  const authHash = crypto.createHash('sha256').update(authHeader, 'utf8').digest('hex');
 
-  const secretBuf = Buffer.from(signSecret, 'utf-8');
-  const signature = crypto
-    .createHmac('sha256', secretBuf)
-    .update(signString)
-    .digest();
+  const payload = `${method}\n${path}\n${timestamp}\n${nonce}\n${bodyHash}\n${authHash}`;
 
-  // base64url 编码，去除填充
-  return signature.toString('base64url').replace(/=+$/, '');
+  return crypto.createHmac('sha256', DEFAULT_SIGN_SECRET).update(payload, 'utf8').digest('hex');
 }
 
 // ─── 设备指纹 ───
 
 /**
- * 生成稳定的设备 ID
- * SHA256(hostname + 固定salt)
- */
-function generateDeviceId(): string {
-  const hostname = 'flyai-cli-worker';
-  const salt = 'fliggy-mcp-device-salt-v1';
-  return crypto.createHash('sha256').update(hostname + salt).digest('hex');
-}
-
-/**
- * 构造虚拟设备信息
- */
-function buildDeviceInfo(): object {
-  return {
-    machine: {
-      platform: 'linux',
-      arch: 'x86_64',
-      cpus: 8,
-      memoryTierGB: 8,
-      osType: 'linux',
-      nodeVersion: 'v22.22.0',
-      osReleaseMajor: '5',
-    },
-    fingerprint: {
-      language: 'zh-CN',
-      platform: 'linux',
-      userAgent: 'flyai-cli/1.0.6 (Node.js v22.22.0; linux x86_64)',
-      hardwareConcurrency: 8,
-      deviceMemory: 8,
-      clientSurface: 'cli',
-      timezoneOffset: -480,
-      deviceId: generateDeviceId(),
-    },
-  };
-}
-
-/**
- * 编码设备指纹为 x-ff-ctx header 值
+ * 设备指纹引擎 (严格对齐 Python AES-GCM)
  *
- * 1. JSON.stringify(deviceInfo)
+ * 1. JSON.stringify({ platform, arch, nodeVersion })
  * 2. gzip 压缩
- * 3. AES-256-GCM 加密 (key = SHA256(sign_secret.encode(utf-8)), iv = random 12字节)
+ * 3. AES-256-GCM 加密 (key = SHA256(DEFAULT_SIGN_SECRET), iv = random 12字节)
  * 4. 拼接 0x01版本字节 + iv + ciphertext + authTag
  * 5. Base64 编码
  */
-function encodeDeviceFingerprint(signSecret: string): string {
-  const deviceInfo = buildDeviceInfo();
-  const jsonStr = JSON.stringify(deviceInfo);
+function generateDeviceContext(): string {
+  const ctxInfo = { platform: "macOS", arch: "arm64", nodeVersion: "v18.17.0" };
+  const ctxStr = JSON.stringify(ctxInfo);
+  const gzipped = zlib.gzipSync(ctxStr);
 
-  // gzip 压缩
-  const compressed = zlib.gzipSync(Buffer.from(jsonStr, 'utf-8'));
-
-  // AES-256-GCM 加密
-  const key = crypto.createHash('sha256').update(signSecret, 'utf-8').digest();
+  const keyBuffer = crypto.createHash('sha256').update(DEFAULT_SIGN_SECRET, 'utf8').digest();
   const iv = crypto.randomBytes(12);
-  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
-  const encrypted = Buffer.concat([
-    cipher.update(compressed),
-    cipher.final(),
-  ]);
-  const authTag = cipher.getAuthTag(); // 16 bytes
 
-  // iv + ciphertext + authTag
-  const result = Buffer.concat([Buffer.from([0x01]), iv, encrypted, authTag]);
+  const cipher = crypto.createCipheriv('aes-256-gcm', keyBuffer, iv);
+  const ciphertext = Buffer.concat([cipher.update(gzipped), cipher.final()]);
+  const authTag = cipher.getAuthTag();
 
-  return result.toString('base64');
+  const versionByte = Buffer.from([0x01]);
+  const finalBuffer = Buffer.concat([versionByte, iv, ciphertext, authTag]);
+
+  return finalBuffer.toString('base64');
 }
 
 // ─── 请求构造 ───
@@ -129,23 +76,21 @@ function encodeDeviceFingerprint(signSecret: string): string {
 /**
  * 构造请求 headers
  */
-function buildHeaders(body: string, apiKey: string, signSecret: string): Record<string, string> {
+function buildHeaders(body: string): Record<string, string> {
   const timestamp = Date.now().toString();
   const nonce = crypto.randomBytes(16).toString('hex');
-  const signature = computeSignature(body, timestamp, nonce, apiKey, signSecret);
+  const signature = generateSignature(body, timestamp, nonce);
+  const deviceCtx = generateDeviceContext();
 
   return {
+    'Authorization': `Bearer ${DEFAULT_API_KEY}`,
     'Content-Type': 'application/json; charset=utf-8',
-    'Accept': 'application/json, text/event-stream',
-    'Authorization': `Bearer ${apiKey}`,
-    'User-Agent': 'flyai-cli/1.0.6',
-    'x-ttid': 'ai2c(sk.clawhub)',
     'x-flyai-ts': timestamp,
-    'x-flyai-sign-ver': '7',
-    'x-flyai-sign-alg': 'hmac-sha256',
     'x-flyai-nonce': nonce,
     'x-flyai-sign': signature,
-    'x-ff-ctx': encodeDeviceFingerprint(signSecret),
+    'x-flyai-sign-ver': '7',
+    'x-flyai-sign-alg': 'hmac-sha256',
+    'x-ff-ctx': deviceCtx,
   };
 }
 
@@ -291,13 +236,10 @@ function mapItemToFlightResult(item: FliggyItem): FlightResult | null {
  */
 export async function fetchFliggyFlights(params: FlightSearchParams): Promise<FlightResult[]> {
   const { departure_city, arrival_city, date } = params;
-  const apiKey = DEFAULT_API_KEY;
-  const signSecret = DEFAULT_SIGN_SECRET;
-
   try {
     // 构造请求体
     const body = buildRequestBody(departure_city, arrival_city, date);
-    const headers = buildHeaders(body, apiKey, signSecret);
+    const headers = buildHeaders(body);
 
     console.log(`[FliggyAdapter] 请求航班: ${departure_city} → ${arrival_city}, 日期: ${date}`);
     console.log('[FliggyAdapter] Request Body:', body);
