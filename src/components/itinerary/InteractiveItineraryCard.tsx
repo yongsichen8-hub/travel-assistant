@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useCallback, useEffect } from 'react';
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { MapViewer } from './MapViewer';
 import type { Itinerary, Activity, FlightInfo } from '@/lib/types/itinerary';
 import type { FlightCandidateGroup, HotelCandidate } from '@/lib/types/itinerary-card';
@@ -14,9 +14,10 @@ interface Props {
   flightGroups: FlightCandidateGroup[];
   hotelCandidates: HotelCandidate[];
   onRegenerateItinerary?: (message: string) => void;
+  isChatLoading?: boolean;
 }
 
-export function InteractiveItineraryCard({ itinerary, flightGroups, hotelCandidates, onRegenerateItinerary }: Props) {
+export function InteractiveItineraryCard({ itinerary, flightGroups, hotelCandidates, onRegenerateItinerary, isChatLoading }: Props) {
   const { user } = useFeishuUser();
   const [flightOverrides, setFlightOverrides] = useState<Record<string, FlightData>>({});
   const [hotelOverrides, setHotelOverrides] = useState<Record<string, HotelCandidate>>({});
@@ -42,6 +43,17 @@ export function InteractiveItineraryCard({ itinerary, flightGroups, hotelCandida
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [itinerary]);
+
+  // 当聊天加载从 true 变为 false 时（AI回复完成），清除 isRegenerating
+  // 解决：重生成时 AI 回复出现在新消息组件中，本组件的 itinerary prop 不变，导致卡住
+  const prevIsChatLoadingRef = useRef(false);
+  useEffect(() => {
+    if (isRegenerating && prevIsChatLoadingRef.current && !isChatLoading) {
+      setIsRegenerating(false);
+      setDraftModifications({});
+    }
+    prevIsChatLoadingRef.current = !!isChatLoading;
+  }, [isChatLoading, isRegenerating]);
 
   // 获取目的地城市用于酒店搜索
   const destinationCity = itinerary.destination.name;
@@ -690,11 +702,12 @@ function ActivityRow({
             <HotelSwitcher
               activityId={activity.id}
               currentHotelName={hotelOverride?.name || activity.title}
+              currentAddress={activity.location?.address}
               city={destinationCity}
               initialCandidates={hotelCandidates}
               currentOverride={hotelOverride}
               onSwitch={(hotel) => onHotelSwitch(activity.id, hotel)}
-              disabled={!isEditing}
+              disabled={false}
             />
           </div>
         )}

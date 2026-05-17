@@ -95,9 +95,9 @@ function buildHeaders(body: string): Record<string, string> {
 }
 
 /**
- * 构造 JSON-RPC 2.0 请求体
+ * 构造 JSON-RPC 2.0 请求体（含分页页码）
  */
-function buildRequestBody(origin: string, destination: string, depDate: string): string {
+function buildRequestBody(origin: string, destination: string, depDate: string, page: number): string {
   const payload = {
     jsonrpc: '2.0',
     id: Date.now().toString(),
@@ -109,6 +109,7 @@ function buildRequestBody(origin: string, destination: string, depDate: string):
         destination,
         depDate,
         limit: 100, // 向飞猪索要完整大盘数据
+        page,       // 分页页码
       },
     },
   };
@@ -230,19 +231,43 @@ function mapItemToFlightResult(item: FliggyItem): FlightResult | null {
 // ─── 主函数 ───
 
 /**
- * 通过飞猪 MCP 搜索航班
+ * 通过飞猪 MCP 搜索航班（分页循环，最多5页共50条）
  *
  * @param params 航班搜索参数
  * @returns FlightResult[] 航班结果数组，失败时返回空数组
  */
 export async function fetchFliggyFlights(params: FlightSearchParams): Promise<FlightResult[]> {
+  const allResults: FlightResult[] = [];
+  const maxPages = 5; // 最多请求5页，共50条
+
+  for (let page = 1; page <= maxPages; page++) {
+    const pageResults = await fetchFliggyFlightsPage(params, page);
+    allResults.push(...pageResults);
+
+    console.log(`[FliggyAdapter] 第${page}页获取到 ${pageResults.length} 趟航班`);
+
+    // 如果本页返回少于10条，说明没有更多数据了
+    if (pageResults.length < 10) break;
+
+    // 请求间隔避免限流
+    if (page < maxPages) await new Promise(r => setTimeout(r, 200));
+  }
+
+  console.log(`[FliggyAdapter] 分页合计获取到 ${allResults.length} 趟航班`);
+  return allResults;
+}
+
+/**
+ * 单页飞猪 MCP 请求
+ */
+async function fetchFliggyFlightsPage(params: FlightSearchParams, page: number): Promise<FlightResult[]> {
   const { departure_city, arrival_city, date } = params;
   try {
-    // 构造请求体
-    const body = buildRequestBody(departure_city, arrival_city, date);
+    // 构造请求体（含分页页码）
+    const body = buildRequestBody(departure_city, arrival_city, date, page);
     const headers = buildHeaders(body);
 
-    console.log(`[FliggyAdapter] 请求航班: ${departure_city} → ${arrival_city}, 日期: ${date}`);
+    console.log(`[FliggyAdapter] 第${page}页请求航班: ${departure_city} → ${arrival_city}, 日期: ${date}`);
     console.log('[FliggyAdapter] Request Body:', body);
     console.log('[FliggyAdapter] Request URL:', API_ENDPOINT);
 
@@ -312,7 +337,7 @@ export async function fetchFliggyFlights(params: FlightSearchParams): Promise<Fl
       return [];
     }
 
-    console.log(`[FliggyAdapter] 成功获取到 ${itemList.length} 趟原始航班数据！`);
+    console.log(`[FliggyAdapter] 第${page}页获取到 ${itemList.length} 趟原始航班数据`);
 
     // 映射为 FlightResult[]
     const flights: FlightResult[] = [];
@@ -323,7 +348,7 @@ export async function fetchFliggyFlights(params: FlightSearchParams): Promise<Fl
       }
     }
 
-    console.log(`[FliggyAdapter] 成功映射 ${flights.length} 条航班`);
+    console.log(`[FliggyAdapter] 第${page}页成功映射 ${flights.length} 条航班`);
     return flights;
   } catch (err) {
     // 网络错误 / 超时

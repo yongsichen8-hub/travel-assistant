@@ -6,6 +6,7 @@ import type { HotelCandidate } from '@/lib/types/itinerary-card';
 interface Props {
   activityId: string;
   currentHotelName: string;
+  currentAddress?: string;
   city: string;
   initialCandidates: HotelCandidate[];
   currentOverride?: HotelCandidate;
@@ -13,7 +14,7 @@ interface Props {
   disabled?: boolean;
 }
 
-export function HotelSwitcher({ currentHotelName, city, initialCandidates, currentOverride, onSwitch, disabled }: Props) {
+export function HotelSwitcher({ currentHotelName, currentAddress, city, initialCandidates, currentOverride, onSwitch, disabled }: Props) {
   const [showSearch, setShowSearch] = useState(false);
   const [keyword, setKeyword] = useState('');
   const [results, setResults] = useState<HotelCandidate[]>(initialCandidates);
@@ -48,13 +49,22 @@ export function HotelSwitcher({ currentHotelName, city, initialCandidates, curre
     <div className="rounded-lg border border-amber-100 bg-amber-50/50 p-2.5 dark:border-amber-900/50 dark:bg-amber-950/20">
       {/* 当前酒店 */}
       <div className="flex items-center justify-between">
-        <span className="text-xs font-medium text-amber-700 dark:text-amber-400">
-          🏨 {displayName}
-        </span>
+        <div className="min-w-0 flex-1">
+          <span className="text-xs font-medium text-amber-700 dark:text-amber-400">
+            🏨 {displayName}
+          </span>
+          {/* 显示地址：优先用 override 地址，否则用 activity 原始地址 */}
+          {(currentOverride?.address || currentAddress) && (
+            <p className="mt-0.5 text-[11px] text-zinc-500 dark:text-zinc-400 truncate">
+              {currentOverride?.address || currentAddress}
+              {currentOverride?.rating && ` | 评分: ${currentOverride.rating}`}
+              {currentOverride?.price && currentOverride.price !== '暂无' && ` | 参考价: ¥${currentOverride.price}`}
+            </p>
+          )}
+        </div>
         <button
           onClick={() => setShowSearch(!showSearch)}
-          disabled={disabled}
-          className={`text-xs hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 ${disabled ? 'text-zinc-400 cursor-not-allowed' : 'text-blue-600'}`}
+          className="ml-2 shrink-0 text-xs hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 text-blue-600"
         >
           {showSearch ? '收起' : '更换酒店'}
         </button>
@@ -62,12 +72,12 @@ export function HotelSwitcher({ currentHotelName, city, initialCandidates, curre
 
       {currentOverride && (
         <p className="mt-0.5 text-[11px] text-zinc-500 dark:text-zinc-400">
-          {currentOverride.address} | 评分: {currentOverride.rating} | 参考价: ¥{currentOverride.price}
+          已切换酒店
         </p>
       )}
 
       {/* 搜索面板 */}
-      {showSearch && !disabled && (
+      {showSearch && (
         <div className="mt-2 space-y-2">
           <div className="flex gap-1.5">
             <input
