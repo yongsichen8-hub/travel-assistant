@@ -27,7 +27,7 @@ const DEFAULT_SIGN_SECRET = 'XSbdYnucPARDc9knhD8+X6hxdD1Nh6ZGI6Hadg25kBw=';
  * 计算 HMAC-SHA256 签名
  *
  * sign_string = "POST\n/mcp\n{timestamp}\n{nonce}\n{sha256_of_body}\n{sha256_of_auth_header}\n"
- * signature = HMAC-SHA256(base64decode(sign_secret), sign_string)
+ * signature = HMAC-SHA256(sign_secret.encode(utf-8), sign_string)
  * result = base64url_encode(signature) 去除末尾 '='
  */
 function computeSignature(
@@ -43,7 +43,7 @@ function computeSignature(
 
   const signString = `POST\n/mcp\n${timestamp}\n${nonce}\n${bodyHash}\n${authHash}\n`;
 
-  const secretBuf = Buffer.from(signSecret, 'base64');
+  const secretBuf = Buffer.from(signSecret, 'utf-8');
   const signature = crypto
     .createHmac('sha256', secretBuf)
     .update(signString)
@@ -97,8 +97,8 @@ function buildDeviceInfo(): object {
  *
  * 1. JSON.stringify(deviceInfo)
  * 2. gzip 压缩
- * 3. AES-256-GCM 加密 (key = SHA256(base64decode(sign_secret)) 前32字节, iv = random 12字节)
- * 4. 拼接 iv + ciphertext + authTag
+ * 3. AES-256-GCM 加密 (key = SHA256(sign_secret.encode(utf-8)), iv = random 12字节)
+ * 4. 拼接 0x01版本字节 + iv + ciphertext + authTag
  * 5. Base64 编码
  */
 function encodeDeviceFingerprint(signSecret: string): string {
@@ -109,7 +109,7 @@ function encodeDeviceFingerprint(signSecret: string): string {
   const compressed = zlib.gzipSync(Buffer.from(jsonStr, 'utf-8'));
 
   // AES-256-GCM 加密
-  const key = crypto.createHash('sha256').update(Buffer.from(signSecret, 'base64')).digest().subarray(0, 32);
+  const key = crypto.createHash('sha256').update(signSecret, 'utf-8').digest();
   const iv = crypto.randomBytes(12);
   const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
   const encrypted = Buffer.concat([
@@ -119,7 +119,7 @@ function encodeDeviceFingerprint(signSecret: string): string {
   const authTag = cipher.getAuthTag(); // 16 bytes
 
   // iv + ciphertext + authTag
-  const result = Buffer.concat([iv, encrypted, authTag]);
+  const result = Buffer.concat([Buffer.from([0x01]), iv, encrypted, authTag]);
 
   return result.toString('base64');
 }
