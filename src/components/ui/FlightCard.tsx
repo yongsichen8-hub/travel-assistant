@@ -10,6 +10,9 @@ interface FlightData {
   duration: string;
   departureCity: string;
   arrivalCity: string;
+  price?: number;
+  stops?: number;
+  cabinClass?: string;
 }
 
 export { type FlightData };
@@ -90,19 +93,33 @@ export function FlightCard({ flight, onSelect }: { flight: FlightData; onSelect?
  */
 export function parseFlightsFromToolResult(result: unknown): FlightData[] {
   if (typeof result !== 'string') return [];
-  // 格式: "ZH1386 | 深圳航空 | 06:25-09:35 | 白云-首都"
+  // 新格式: "ZH1386 | 深圳航空 | 06:25-09:35 | 白云-首都 | ¥680 | 直飞"
+  // 旧格式: "ZH1386 | 深圳航空 | 06:25-09:35 | 白云-首都"
   const lines = result.split('\n');
   const flights: FlightData[] = [];
 
   for (const line of lines) {
     const parts = line.split(' | ');
-    if (parts.length !== 4) continue;
+    if (parts.length < 4) continue;
 
     const [flightNo, airline, timeRange, airports] = parts;
     const times = timeRange.split('-');
     const airportPair = airports.split('-');
 
     if (times.length !== 2 || airportPair.length !== 2) continue;
+
+    // 新增字段（可选，向后兼容）
+    let price: number | undefined;
+    let stops: number | undefined;
+
+    if (parts.length >= 5 && parts[4].startsWith('¥')) {
+      price = parseInt(parts[4].replace('¥', ''), 10);
+      if (isNaN(price)) price = undefined;
+    }
+    if (parts.length >= 6) {
+      stops = parts[5] === '直飞' ? 0 : parseInt(parts[5].replace('经停', ''), 10);
+      if (isNaN(stops)) stops = undefined;
+    }
 
     flights.push({
       flightNo: flightNo.trim(),
@@ -114,6 +131,8 @@ export function parseFlightsFromToolResult(result: unknown): FlightData[] {
       duration: '',
       departureCity: '',
       arrivalCity: '',
+      price,
+      stops,
     });
   }
 

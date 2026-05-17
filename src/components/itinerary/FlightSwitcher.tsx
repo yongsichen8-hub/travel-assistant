@@ -10,9 +10,10 @@ interface Props {
   candidates: FlightCandidateGroup[];
   currentOverride?: FlightData;
   onSwitch: (flight: FlightData) => void;
+  aircraftMap?: Record<string, string>;
 }
 
-export function FlightSwitcher({ currentFlight, candidates, currentOverride, onSwitch }: Props) {
+export function FlightSwitcher({ currentFlight, candidates, currentOverride, onSwitch, aircraftMap }: Props) {
   const hasCandidates = candidates.some(g => g.flights.length > 0);
 
   // 当前展示的航班（优先覆盖值）
@@ -90,11 +91,24 @@ export function FlightSwitcher({ currentFlight, candidates, currentOverride, onS
           <option value="" disabled>切换航班...</option>
           {candidates.map((group, gi) => (
             <optgroup key={gi} label={`${DIRECTION_LABELS[group.direction]} ${group.departureCity}→${group.arrivalCity} ${group.date}`}>
-              {group.flights.slice(0, 15).map((f, fi) => (
-                <option key={`${gi}-${fi}`} value={`${gi}-${fi}`}>
-                  [{f.departureTime}-{f.arrivalTime}] {f.flightNo} | {f.departureAirport}→{f.arrivalAirport}
-                </option>
-              ))}
+              {group.flights.slice(0, 15).map((f, fi) => {
+                  // 构造 option 文本
+                  let optionText = `[${f.departureTime}-${f.arrivalTime}] ${f.flightNo} | ${f.airline}`;
+                  if (f.price && f.price > 0) {
+                    optionText += ` | ¥${f.price}`;
+                  }
+                  if (f.stops !== undefined) {
+                    optionText += ` | ${f.stops === 0 ? '直飞' : `经停${f.stops}`}`;
+                  }
+                  if (aircraftMap && aircraftMap[f.flightNo]) {
+                    optionText += ` | ${aircraftMap[f.flightNo]}`;
+                  }
+                  return (
+                    <option key={`${gi}-${fi}`} value={`${gi}-${fi}`}>
+                      {optionText}
+                    </option>
+                  );
+                })}
             </optgroup>
           ))}
         </select>

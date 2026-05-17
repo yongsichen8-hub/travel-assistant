@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import { MapViewer } from './MapViewer';
 import type { Itinerary, Activity, FlightInfo } from '@/lib/types/itinerary';
 import type { FlightCandidateGroup, HotelCandidate } from '@/lib/types/itinerary-card';
@@ -19,6 +19,7 @@ export function InteractiveItineraryCard({ itinerary, flightGroups, hotelCandida
   const { user } = useFeishuUser();
   const [flightOverrides, setFlightOverrides] = useState<Record<string, FlightData>>({});
   const [hotelOverrides, setHotelOverrides] = useState<Record<string, HotelCandidate>>({});
+  const [aircraftMap, setAircraftMap] = useState<Record<string, string>>({});
   const [sendStatus, setSendStatus] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
   const [sendError, setSendError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'timeline' | 'map'>('timeline');
@@ -26,6 +27,49 @@ export function InteractiveItineraryCard({ itinerary, flightGroups, hotelCandida
 
   // 获取目的地城市用于酒店搜索
   const destinationCity = itinerary.destination.name;
+
+  // 异步获取机型信息（FR24）
+  useEffect(() => {
+    if (!flightGroups || flightGroups.length === 0) return;
+
+    // 收集所有唯一航班号
+    const flightNos = new Set<string>();
+    flightGroups.forEach(group => {
+      group.flights.forEach(flight => {
+        if (flight.flightNo) flightNos.add(flight.flightNo);
+      });
+    });
+
+    // 异步获取机型（每次最多 10 个，避免过多请求）
+    const fetchAircraft = async () => {
+      const entries: [string, string][] = [];
+      const batch = Array.from(flightNos).slice(0, 10);
+
+      for (const flightNo of batch) {
+        try {
+          const res = await fetch('/api/flights/enrich', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ flightNo }),
+          });
+          const data = await res.json();
+          if (data.aircraft) {
+            entries.push([flightNo, data.aircraft]);
+          }
+        } catch {
+          // 静默忽略
+        }
+        // 200ms 间隔避免限流
+        await new Promise(r => setTimeout(r, 200));
+      }
+
+      if (entries.length > 0) {
+        setAircraftMap(prev => ({ ...prev, ...Object.fromEntries(entries) }));
+      }
+    };
+
+    fetchAircraft();
+  }, [flightGroups]);
 
   // 计算 dirty itinerary（合并覆盖）
   const dirtyItinerary = useMemo((): Itinerary => {
@@ -42,7 +86,7 @@ export function InteractiveItineraryCard({ itinerary, flightGroups, hotelCandida
             arrivalCity: f.arrivalCity || activity.flight?.arrivalCity || '',
             departureTime: f.departureTime,
             arrivalTime: f.arrivalTime,
-            price: activity.flight?.price,
+            price: f.price ?? activity.flight?.price,
             cabinClass: activity.flight?.cabinClass,
           };
           return {
@@ -172,6 +216,7 @@ export function InteractiveItineraryCard({ itinerary, flightGroups, hotelCandida
               flightOverrides={flightOverrides}
               hotelOverrides={hotelOverrides}
               destinationCity={destinationCity}
+              aircraftMap={aircraftMap}
               onFlightSwitch={handleFlightSwitch}
               onHotelSwitch={handleHotelSwitch}
               isLoggedIn={!!user}
@@ -259,6 +304,7 @@ function DaySection({
   flightOverrides,
   hotelOverrides,
   destinationCity,
+  aircraftMap,
   onFlightSwitch,
   onHotelSwitch,
   isLoggedIn,
@@ -269,6 +315,7 @@ function DaySection({
   flightOverrides: Record<string, FlightData>;
   hotelOverrides: Record<string, HotelCandidate>;
   destinationCity: string;
+  aircraftMap: Record<string, string>;
   onFlightSwitch: (activityId: string, flight: FlightData) => void;
   onHotelSwitch: (activityId: string, hotel: HotelCandidate) => void;
   isLoggedIn: boolean;
@@ -298,6 +345,7 @@ function DaySection({
             flightOverride={flightOverrides[activity.id]}
             hotelOverride={hotelOverrides[activity.id]}
             destinationCity={destinationCity}
+            aircraftMap={aircraftMap}
             onFlightSwitch={onFlightSwitch}
             onHotelSwitch={onHotelSwitch}
             isLoggedIn={isLoggedIn}
@@ -328,6 +376,7 @@ function ActivityRow({
   flightOverride,
   hotelOverride,
   destinationCity,
+  aircraftMap,
   onFlightSwitch,
   onHotelSwitch,
   isLoggedIn,
@@ -339,6 +388,7 @@ function ActivityRow({
   flightOverride?: FlightData;
   hotelOverride?: HotelCandidate;
   destinationCity: string;
+  aircraftMap: Record<string, string>;
   onFlightSwitch: (activityId: string, flight: FlightData) => void;
   onHotelSwitch: (activityId: string, hotel: HotelCandidate) => void;
   isLoggedIn: boolean;
@@ -465,6 +515,7 @@ function ActivityRow({
               candidates={relevantGroups}
               currentOverride={flightOverride}
               onSwitch={(flight) => onFlightSwitch(activity.id, flight)}
+              aircraftMap={aircraftMap}
             />
           </div>
         )}

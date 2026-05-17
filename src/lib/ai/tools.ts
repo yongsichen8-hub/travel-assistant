@@ -72,11 +72,11 @@ export const allTools = {
         const flights = result.flights;
         if (flights.length > 0) {
           const count = flights.length;
-          // 极简脱水格式：航班号 | 航司 | 起降时间 | 出发机场-到达机场
+          // 极简脱水格式：航班号 | 航司 | 起降时间 | 出发机场-到达机场 | 价格 | 经停
           const flightLines = flights.map(f =>
-            `${f.flightNo} | ${f.airline} | ${f.departureTime}-${f.arrivalTime} | ${f.departureAirport}-${f.arrivalAirport}`
+            `${f.flightNo} | ${f.airline} | ${f.departureTime}-${f.arrivalTime} | ${f.departureAirport}-${f.arrivalAirport} | ¥${f.price} | ${f.stops === 0 ? '直飞' : `经停${f.stops}`}`
           ).join('\n');
-          return `【航班数据】${departure_city}→${arrival_city} ${date} 共${count}趟航班（全量，已去重代码共享）\n你已获得全天航班的极简视图，请结合用户的飞书日历（check_schedule 返回的 conflicts 时间段）和用户偏好，从中挑选最符合要求的航班推荐。注意不同机场到目的地的通勤时间不同（如北京首都vs大兴、上海浦东vs虹桥），请优先推荐离用户办事地点更近的机场。绝对禁止编造不在此列表中的航班号。\n\n${flightLines}`;
+          return `【航班数据】${departure_city}→${arrival_city} ${date} 共${count}趟航班（全量，已去重代码共享）格式：航班号 | 航司 | 起降时间 | 机场 | 价格 | 经停。请结合用户的飞书日历和偏好从中挑选最符合要求的航班，注意价格和经停信息。不同机场到目的地的通勤时间不同（如北京首都vs大兴、上海浦东vs虹桥），请优先推荐离用户办事地点更近的机场。绝对禁止编造不在此列表中的航班号。\n\n${flightLines}`;
         }
         return '【航班查询结果】未查询到该航线的航班数据。请告知用户暂无航班信息，绝对不要编造航班号。';
       } catch (error) {
