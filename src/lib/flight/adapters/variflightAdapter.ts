@@ -1,8 +1,8 @@
 /**
- * 飞常准（VariFlight）MCP 航班时刻表适配器
+ * 飞常准（VariFlight）航班时刻表适配器
  *
- * 端点: POST https://open-al.variflight.com/mcp
- * 协议: JSON-RPC 2.0
+ * 端点: GET https://open-al.variflight.com/api/flight
+ * 协议: REST GET
  * 认证: Bearer Token
  *
  * 飞常准提供企业级航班时刻表数据，不提供价格。
@@ -15,7 +15,7 @@ import { iataToAirportName } from '../airports';
 // ─── 常量 ───
 
 const VARIFLIGHT_API_KEY = process.env.VARIFLIGHT_API_KEY || '';
-const API_ENDPOINT = 'https://open-al.variflight.com/mcp';
+const API_BASE_URL = 'https://open-al.variflight.com/api/flight';
 const TIMEOUT_MS = 15_000;
 
 /**
@@ -85,54 +85,18 @@ function formatTime(timeStr: string): string {
 // ─── 请求构造 ───
 
 /**
- * 构造 MCP JSON-RPC 2.0 请求体
- */
-function buildRequestBody(dep: string, arr: string, date: string): string {
-  const payload = {
-    jsonrpc: '2.0',
-    id: String(Date.now()),
-    method: 'tools/call',
-    params: {
-      name: 'searchFlightsByDepArr',
-      arguments: {
-        dep,       // IATA 三字码，如 PEK
-        arr,       // IATA 三字码，如 CAN
-        date,      // YYYY-MM-DD 格式（保留连字符）
-      },
-    },
-  };
-  return JSON.stringify(payload);
-}
-
-/**
- * 构造请求 headers
+ * 构造请求 headers（仅 Authorization）
  */
 function buildHeaders(): Record<string, string> {
   return {
-    'Content-Type': 'application/json',
     'Authorization': `Bearer ${VARIFLIGHT_API_KEY}`,
-  };
-}
-
-// ─── 响应类型 ───
-
-/** MCP JSON-RPC 响应顶层结构 */
-interface McpRpcResponse {
-  jsonrpc?: string;
-  id?: string;
-  result?: {
-    content?: Array<{ type?: string; text?: string }>;
-  };
-  error?: {
-    code?: number;
-    message?: string;
   };
 }
 
 // ─── 主函数 ───
 
 /**
- * 从飞常准 MCP 获取航班时刻表数据
+ * 从飞常准 REST API 获取航班时刻表数据
  *
  * @param params 标准航班搜索参数
  * @returns FlightResult[] 数据源标记为 'variflight'，price=0（需飞猪补价）
@@ -147,78 +111,45 @@ export async function fetchVariflightFlights(
 
   const dep = cityToIATACode(params.departure_city);
   const arr = cityToIATACode(params.arrival_city);
-  // MCP 日期格式：YYYY-MM-DD（保留连字符，与 REST API 的 YYYYMMDD 不同）
+  // 日期格式：YYYY-MM-DD（保留连字符）
   const date = params.date;
 
-  // 构造 MCP 请求
-  const body = buildRequestBody(dep, arr, date);
+  // 构造 REST GET URL
+  const queryParams = new URLSearchParams({ dep, arr, date });
+  const url = `${API_BASE_URL}?${queryParams.toString()}`;
   const headers = buildHeaders();
 
   console.log(`[VariFlight] 请求航班: ${params.departure_city}(${dep}) → ${params.arrival_city}(${arr}), 日期: ${date}`);
-  console.log('[VariFlight] Request URL:', API_ENDPOINT);
-  console.log('[VariFlight] Request Headers:', JSON.stringify(headers, null, 2));
-  console.log('[VariFlight] Request Body:', body);
+  console.log('[VariFlight] 请求 URL:', url);
+  console.log('[VariFlight] 请求 Headers:', JSON.stringify(headers, null, 2));
 
   try {
-    const response = await fetch(API_ENDPOINT, {
-      method: 'POST',
+    const response = await fetch(url, {
+      method: 'GET',
       headers,
-      body,
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
 
-    console.log(`[VariFlight] HTTP Status: ${response.status}`);
-    const responseText = await response.text();
-    console.log('[VariFlight] Response Body:', responseText.substring(0, 500));
+    console.log('[VariFlight] HTTP Status:', response.status);
 
     // HTTP 层面错误
     if (!response.ok) {
-      console.error(`[VariFlight] HTTP 错误: ${response.status} | body: ${responseText.substring(0, 300)}`);
+      const errorText = await response.text();
+      console.error(`[VariFlight] HTTP 错误: ${response.status} | body: ${errorText.substring(0, 300)}`);
       return [];
     }
 
-    // 解析 JSON-RPC 响应
-    let rpcResult: McpRpcResponse;
-    try {
-      rpcResult = JSON.parse(responseText);
-    } catch (parseErr) {
-      console.error('[VariFlight] JSON解析失败:', parseErr, '原始响应:', responseText.substring(0, 500));
-      return [];
-    }
+    // 直接解析 REST JSON 响应
+    const json = await response.json();
+    console.log('[VariFlight] 响应体(前500):', JSON.stringify(json).substring(0, 500));
 
-    // 检查 JSON-RPC 错误
-    if (rpcResult.error) {
-      console.error('[VariFlight] JSON-RPC错误:', JSON.stringify(rpcResult.error));
-      return [];
-    }
-
-    // 提取 content 中的 text 字段（MCP 返回格式：result.content[0].text）
-    const escapedText = rpcResult.result?.content?.[0]?.text;
-    if (!escapedText) {
-      console.error('[VariFlight] 无法获取 result.content[0].text');
-      return [];
-    }
-
-    // 二次解析：content.text 是 JSON 字符串，需要 JSON.parse 得到航班数组
-    let flightsRaw: any;
-    try {
-      flightsRaw = JSON.parse(escapedText);
-      // 如果解析结果仍然是字符串，说明还需要再解析一次
-      if (typeof flightsRaw === 'string') {
-        flightsRaw = JSON.parse(flightsRaw);
-      }
-    } catch (parseErr) {
-      console.error('[VariFlight] content.text 二次解析失败:', parseErr, 'text:', escapedText.substring(0, 500));
-      return [];
-    }
-
-    // 兼容多种响应结构：直接数组、data 数组、flightList 数组
-    const flights: any[] = Array.isArray(flightsRaw)
-      ? flightsRaw
-      : flightsRaw?.data || flightsRaw?.flightList || [];
+    // 兼容多种响应结构：data 数组、flightList 数组、直接数组
+    const flights: any[] = Array.isArray(json)
+      ? json
+      : json?.data || json?.flightList || [];
 
     if (!Array.isArray(flights) || flights.length === 0) {
-      console.log(`[VariFlight] 无航班数据，原始响应结构 keys: ${flightsRaw ? Object.keys(flightsRaw) : 'null'}`);
+      console.log(`[VariFlight] 无航班数据，原始响应结构 keys: ${json ? Object.keys(json) : 'null'}`);
       return [];
     }
 
