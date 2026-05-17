@@ -284,29 +284,34 @@ export async function fetchFliggyFlights(params: FlightSearchParams): Promise<Fl
       return [];
     }
 
-    // 提取 content 中的 text 字段
-    const contentText = rpcResult.result?.content?.[0]?.text;
-    if (!contentText) {
-      console.error('[FliggyAdapter] 响应中无有效content:', responseText.substring(0, 500));
+    // 提取 content 中的 text 字段（转义的 JSON 字符串）
+    const escapedText = rpcResult.result?.content?.[0]?.text;
+    if (!escapedText) {
+      console.error('[FliggyAdapter] 无法获取 content[0].text');
       return [];
     }
 
-    // 解析 itemList
-    let flightData: { itemList?: FliggyItem[] };
+    // 核心修复：二次解析，将转义字符串还原为真正的飞猪数据对象
+    let innerData: any;
     try {
-      flightData = JSON.parse(contentText);
+      innerData = JSON.parse(escapedText);
+      // 如果解析结果仍然是字符串，说明还需要再解析一次
+      if (typeof innerData === 'string') {
+        innerData = JSON.parse(innerData);
+      }
     } catch (parseErr) {
-      console.error('[FliggyAdapter] content.text JSON解析失败:', parseErr, 'text:', contentText.substring(0, 500));
+      console.error('[FliggyAdapter] content.text 二次解析失败:', parseErr, 'text:', escapedText.substring(0, 500));
       return [];
     }
 
-    const itemList = flightData.itemList;
-    if (!Array.isArray(itemList) || itemList.length === 0) {
-      console.log('[FliggyAdapter] 无航班数据返回');
+    // 获取真实的航班列表（兼容 data.itemList 和直接 itemList 两种路径）
+    const itemList: FliggyItem[] = innerData?.data?.itemList || innerData?.itemList;
+    if (!itemList || itemList.length === 0) {
+      console.log('[FliggyAdapter] 二次解析成功，但 itemList 为空');
       return [];
     }
 
-    console.log(`[FliggyAdapter] 获取到 ${itemList.length} 条航班数据`);
+    console.log(`[FliggyAdapter] 成功获取到 ${itemList.length} 趟原始航班数据！`);
 
     // 映射为 FlightResult[]
     const flights: FlightResult[] = [];
