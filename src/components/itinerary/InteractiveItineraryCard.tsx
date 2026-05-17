@@ -47,7 +47,7 @@ export function InteractiveItineraryCard({ itinerary, flightGroups, hotelCandida
 
       for (const flightNo of batch) {
         try {
-          const res = await fetch('/api/flights/enrich', {
+          const res = await fetch(`${process.env.NEXT_PUBLIC_BASE_PATH || ''}/api/flights/enrich`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ flightNo }),
