@@ -33,4 +33,5 @@ export interface FlightResult {
   status?: string;              // 航班状态（用于清洗过滤）
   segments?: FlightSegment[];   // 经停段详情
   onTimeRate?: string;          // 准点率（可选）
+  priceTag?: string;           // 价格标签（如'企业协议价'）
 }
