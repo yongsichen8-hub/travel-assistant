@@ -108,6 +108,7 @@ function buildRequestBody(origin: string, destination: string, depDate: string):
         origin,
         destination,
         depDate,
+        limit: 100, // 向飞猪索要完整大盘数据
       },
     },
   };
