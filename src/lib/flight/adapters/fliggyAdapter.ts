@@ -135,7 +135,7 @@ function buildHeaders(body: string, apiKey: string, signSecret: string): Record<
   const signature = computeSignature(body, timestamp, nonce, apiKey, signSecret);
 
   return {
-    'Content-Type': 'application/json',
+    'Content-Type': 'application/json; charset=utf-8',
     'Accept': 'application/json, text/event-stream',
     'Authorization': `Bearer ${apiKey}`,
     'User-Agent': 'flyai-cli/1.0.6',
@@ -152,10 +152,10 @@ function buildHeaders(body: string, apiKey: string, signSecret: string): Record<
 /**
  * 构造 JSON-RPC 2.0 请求体
  */
-function buildRequestBody(origin: string, destination: string, depDate: string, limit: number = 50): string {
+function buildRequestBody(origin: string, destination: string, depDate: string): string {
   const payload = {
     jsonrpc: '2.0',
-    id: 1,
+    id: Date.now().toString(),
     method: 'tools/call',
     params: {
       name: 'search_flight',
@@ -163,7 +163,6 @@ function buildRequestBody(origin: string, destination: string, depDate: string, 
         origin,
         destination,
         depDate,
-        limit,
       },
     },
   };
@@ -301,6 +300,8 @@ export async function fetchFliggyFlights(params: FlightSearchParams): Promise<Fl
     const headers = buildHeaders(body, apiKey, signSecret);
 
     console.log(`[FliggyAdapter] 请求航班: ${departure_city} → ${arrival_city}, 日期: ${date}`);
+    console.log('[FliggyAdapter] Request Body:', body);
+    console.log('[FliggyAdapter] Request URL:', API_ENDPOINT);
 
     // 发起请求，15秒超时
     const response = await fetch(API_ENDPOINT, {
@@ -310,27 +311,28 @@ export async function fetchFliggyFlights(params: FlightSearchParams): Promise<Fl
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
 
+    console.log('[FliggyAdapter] Response Status:', response.status);
+    const responseText = await response.text();
+    console.log('[FliggyAdapter] Response Body:', responseText.substring(0, 500));
+
     // 签名错误 (401)
     if (response.status === 401) {
-      const errorText = await response.text().catch(() => '');
-      console.error('[FliggyAdapter] 签名验证失败 (401):', errorText);
+      console.error('[FliggyAdapter] 签名验证失败 (401):', responseText);
       return [];
     }
 
     if (!response.ok) {
-      const errorText = await response.text().catch(() => '');
-      console.error(`[FliggyAdapter] API请求失败 - 状态码: ${response.status}`, errorText);
+      console.error(`[FliggyAdapter] API请求失败 - 状态码: ${response.status}`, responseText);
       return [];
     }
 
     // 解析响应
-    const rawText = await response.text();
     let rpcResult: FliggyResponse;
 
     try {
-      rpcResult = JSON.parse(rawText);
+      rpcResult = JSON.parse(responseText);
     } catch (parseErr) {
-      console.error('[FliggyAdapter] JSON解析失败:', parseErr, '原始响应:', rawText.substring(0, 500));
+      console.error('[FliggyAdapter] JSON解析失败:', parseErr, '原始响应:', responseText.substring(0, 500));
       return [];
     }
 
@@ -343,7 +345,7 @@ export async function fetchFliggyFlights(params: FlightSearchParams): Promise<Fl
     // 提取 content 中的 text 字段
     const contentText = rpcResult.result?.content?.[0]?.text;
     if (!contentText) {
-      console.error('[FliggyAdapter] 响应中无有效content:', rawText.substring(0, 500));
+      console.error('[FliggyAdapter] 响应中无有效content:', responseText.substring(0, 500));
       return [];
     }
 
