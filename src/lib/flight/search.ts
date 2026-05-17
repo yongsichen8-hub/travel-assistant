@@ -38,7 +38,23 @@ export async function searchFlights(
     const isNotCancelled = !flight.status || 
       (flight.status !== 'Cancelled' && flight.status !== '已取消');
     const hasValidTime = Boolean(flight.departureTime && flight.arrivalTime);
+
+    // 国内直飞铁律：出发和到达城市都含中文 → 视为国内航线，强制只保留直飞
+    const isDomestic =
+      /[\u4e00-\u9fa5]/.test(flight.departureCity) &&
+      /[\u4e00-\u9fa5]/.test(flight.arrivalCity);
+    if (isDomestic && flight.stops > 0) {
+      return false;
+    }
+
     return hasValidPrice && isNotCancelled && hasValidTime;
+  });
+
+  // 全量返回，按起飞时间从早到晚排序
+  validFlights.sort((a, b) => {
+    const timeA = a.departureTime || '';
+    const timeB = b.departureTime || '';
+    return timeA.localeCompare(timeB);
   });
 
   console.log(`[FlightSearch] 原始 ${rawFlights.length} 趟 → 清洗后 ${validFlights.length} 趟有效航班`);

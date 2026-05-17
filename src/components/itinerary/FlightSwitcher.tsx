@@ -1,8 +1,26 @@
 'use client';
 
+import { useState, useMemo } from 'react';
 import type { FlightInfo } from '@/lib/types/itinerary';
 import type { FlightData } from '@/components/ui/FlightCard';
 import type { FlightCandidateGroup } from '@/lib/types/itinerary-card';
+
+type TimePeriod = 'dawn' | 'morning' | 'afternoon' | 'evening';
+
+const TIME_PERIODS: { key: TimePeriod; label: string; start: number; end: number }[] = [
+  { key: 'dawn', label: '凌晨', start: 0, end: 6 },
+  { key: 'morning', label: '上午', start: 6, end: 12 },
+  { key: 'afternoon', label: '下午', start: 12, end: 18 },
+  { key: 'evening', label: '晚上', start: 18, end: 24 },
+];
+
+function getTimePeriod(time: string): TimePeriod {
+  const hour = parseInt(time.split(':')[0], 10);
+  if (hour < 6) return 'dawn';
+  if (hour < 12) return 'morning';
+  if (hour < 18) return 'afternoon';
+  return 'evening';
+}
 
 interface Props {
   activityId: string;
@@ -15,6 +33,28 @@ interface Props {
 
 export function FlightSwitcher({ currentFlight, candidates, currentOverride, onSwitch, aircraftMap }: Props) {
   const hasCandidates = candidates.some(g => g.flights.length > 0);
+
+  // 按时段分组所有航班
+  const periodGroups = useMemo(() => {
+    const counts: Record<TimePeriod, number> = { dawn: 0, morning: 0, afternoon: 0, evening: 0 };
+    for (const group of candidates) {
+      for (const f of group.flights) {
+        counts[getTimePeriod(f.departureTime)]++;
+      }
+    }
+    return counts;
+  }, [candidates]);
+
+  // 默认时段根据当前选中航班起飞时间
+  const defaultPeriod = useMemo(() => {
+    const dt = currentOverride?.departureTime || currentFlight.departureTime;
+    return getTimePeriod(dt);
+  }, [currentOverride, currentFlight]);
+
+  const [activeTab, setActiveTab] = useState<TimePeriod>(defaultPeriod);
+
+  // 判断某个航班是否属于当前选中时段
+  const isInActivePeriod = (f: FlightData) => getTimePeriod(f.departureTime) === activeTab;
 
   // 当前展示的航班（优先覆盖值）
   const displayFlight = currentOverride
@@ -81,17 +121,55 @@ export function FlightSwitcher({ currentFlight, candidates, currentOverride, onS
         )}
       </div>
 
+      {/* 时段 Tab */}
+      {hasCandidates && (
+        <div className="flex gap-2 mb-2 mt-2">
+          {TIME_PERIODS.map(({ key, label }) => {
+            const count = periodGroups[key];
+            if (count === 0) {
+              return (
+                <span
+                  key={key}
+                  className="bg-gray-50 text-gray-300 text-xs px-3 py-1 rounded-full cursor-not-allowed"
+                >
+                  {label}(0)
+                </span>
+              );
+            }
+            const isActive = activeTab === key;
+            return (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setActiveTab(key)}
+                className={isActive
+                  ? 'bg-gray-700 text-white text-xs px-3 py-1 rounded-full'
+                  : 'bg-gray-100 text-gray-500 text-xs px-3 py-1 rounded-full'
+                }
+              >
+                {label}({count})
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       {/* 下拉选择器 */}
       {hasCandidates && (
         <select
           value={currentKey}
           onChange={handleChange}
-          className="mt-1.5 w-full rounded border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-700 focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400 dark:border-zinc-600 dark:bg-zinc-700 dark:text-zinc-200"
+          className="w-full rounded border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-700 focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400 dark:border-zinc-600 dark:bg-zinc-700 dark:text-zinc-200"
         >
           <option value="" disabled>切换航班...</option>
-          {candidates.map((group, gi) => (
-            <optgroup key={gi} label={`${DIRECTION_LABELS[group.direction]} ${group.departureCity}→${group.arrivalCity} ${group.date}`}>
-              {group.flights.slice(0, 15).map((f, fi) => {
+          {candidates.map((group, gi) => {
+            const filteredFlights = group.flights
+              .map((f, fi) => ({ flight: f, index: fi }))
+              .filter(({ flight }) => isInActivePeriod(flight));
+            if (filteredFlights.length === 0) return null;
+            return (
+              <optgroup key={gi} label={`${DIRECTION_LABELS[group.direction]} ${group.departureCity}→${group.arrivalCity} ${group.date}`}>
+                {filteredFlights.map(({ flight: f, index: fi }) => {
                   // 构造 option 文本
                   let optionText = `[${f.departureTime}-${f.arrivalTime}] ${f.flightNo} | ${f.airline}`;
                   if (f.price && f.price > 0) {
@@ -109,8 +187,9 @@ export function FlightSwitcher({ currentFlight, candidates, currentOverride, onS
                     </option>
                   );
                 })}
-            </optgroup>
-          ))}
+              </optgroup>
+            );
+          })}
         </select>
       )}
     </div>
