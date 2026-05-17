@@ -110,11 +110,16 @@ export async function fetchVariflightFlights(
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
+    const headers = {
+      'Authorization': `Bearer ${VARIFLIGHT_API_KEY}`,
+    };
+
+    console.log('[VariFlight] 请求 URL:', url);
+    console.log('[VariFlight] 请求 Headers:', JSON.stringify(headers, null, 2));
+
     const response = await fetch(url, {
       method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${VARIFLIGHT_API_KEY}`,
-      },
+      headers,
       signal: controller.signal,
     });
     clearTimeout(timeout);
